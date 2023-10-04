@@ -1119,7 +1119,7 @@ class LivePrediction(object):
 
             d = {
                 'BUSINESS_ID': self.business_ids, 'MASTER_PARTICIPANT_ID': self.master_participant_id,
-                'FISCAL_YEAR': self.fiscal_year, 'PRED_TERM_PROB': probs[:, 1]
+                'FISCAL_YEAR': self.cal_year, 'PRED_TERM_PROB': probs[:, 1]
                 }
             
             try:
@@ -1257,7 +1257,7 @@ class LivePrediction(object):
 
         self.results.to_csv(
             self.visual_output_path + '/part_visual_' + self.type_model + '.tsv',
-            header=None, index=False, sep='\t'
+            index=False, sep='\t'
         )
 
         if TEST_MODE_ON == False:
