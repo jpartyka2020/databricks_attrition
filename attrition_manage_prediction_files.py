@@ -42,9 +42,9 @@ for one_file in prediction_file_list:
     print("Time difference between " + str(now) + " and " + str(this_file_datetime_obj) + " is: " + str(time_difference))
 
     # Define a timedelta representing 30 minutes
-    thirty_minutes = timedelta(minutes=30)
+    two_weeks = timedelta(days=14)
     
-    if time_difference >= thirty_minutes:
+    if time_difference >= two_weeks:
         print("mark for deletion")
         delete_file_list.append(file_path + this_file_name)
     else:
