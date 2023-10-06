@@ -57,17 +57,6 @@ MANDATORY_REPORTING_COLUMNS_LIST = ['BUSINESS_ID', 'CAL_YEAR', 'TERM_AS_OF_DATE'
 
 # COMMAND ----------
 
-# try:
-#     dt = datetime.now()
-#     logging.basicConfig(filename="/dbfs/FileStore/logs/status" + "_" +  dt.strftime("%Y_%m_%d") + ".log", 
-#                         format='%(asctime)s - %(levelname)s - %(message)s', filemode='a', level=logging.ERROR)
-#     logger = logging.getLogger()
-# except FileNotFoundError as f:
-#     msg = "Logger filepath not found."
-#     raise FileNotFoundError(msg)
-
-# COMMAND ----------
-
 #constants to control how this notebook is run
 TEST_MODE_ON = True
 test_fiscal_data_path = ''
@@ -85,8 +74,10 @@ fiscal_file_path_cl = '/dbfs/FileStore/attrition_test_data/cleaned_gregorian_dat
 gregorian_output_path = '/dbfs/FileStore/prediction_output/'
 gregorian_vis_output_path = '/dbfs/FileStore/visual_output/'
 fiscal_output_path = '/dbfs/FileStore/prediction_output/'
+fortnightly_prediction_output_path = '/dbfs/FileStore/prediction_output/fortnightly_prediction_files'
 fiscal_vis_output_path = '/dbfs/FileStore/visual_output/'
 model_input_cl = '/dbfs/FileStore/pickleFiles'
+fortnightly_log_file_path = '/dbfs/FileStore/prediction_output/fortnightly_log_files'
 
 # COMMAND ----------
 
@@ -749,7 +740,7 @@ class RandomForest(object):
 class LivePrediction(object):
     """ Creates a prediction object that can then be used to clean the data and output prediction. """
 
-    def __init__(self, type_model, header_path, data_path, pred_output_path, visual_output_path, model_path):
+    def __init__(self, type_model, header_path, data_path, pred_output_path, visual_output_path, model_path, fortnightly_prediction_output_path, fortnightly_log_file_path):
         """
         Initialized the LivePrediction Class.
 
@@ -759,7 +750,9 @@ class LivePrediction(object):
         data_path -- the filepath to retreive data
         pred_output_path -- the filepath to output predictions
         visual_output_path -- the filepath to output visual weights
-        model_path -- the filepath to retrieve the model 
+        model_path -- the filepath to retrieve the model
+        fortnightly_prediction_output_path -- the path where you can find prediction output files
+        fortnightly_log_file_path -- the path where you can find log files for a given model run
         """
         prefix_str = ""   #change to empty string for local run.
 
@@ -768,6 +761,11 @@ class LivePrediction(object):
         self.pred_output_path = prefix_str + pred_output_path
         self.visual_output_path = prefix_str + visual_output_path
         self.model_path = model_path
+        self.fortnightly_prediction_output_path = fortnightly_prediction_output_path
+        self.fortnightly_log_file_path = fortnightly_log_file_path
+
+        #we will log events using a string
+        self.log_file_str = "Start attrition model run: " + datetime.now().strftime('%Y_%m_%d_%H:%M:%S') + '\n\n' 
 
         try:
         
@@ -776,8 +774,12 @@ class LivePrediction(object):
             if self.df.shape[1] == MAX_COL:
                 self.df = self.df.iloc[:, 0:-2]
 
+            self.log_file_str += 'Input file loaded successfully' + '\n'
+
         except FileNotFoundError as f:
             msg = "Data Path or Header Path Incorrect."
+            self.log_file_str += msg
+            self.write_log_file()
             #logger.critical(msg)
             #logger.critical(f)
             raise FileNotFoundError(msg)
@@ -786,37 +788,67 @@ class LivePrediction(object):
             self.df.reset_index(
                 drop=True, inplace=True
             )
+
+            self.log_file_str += 'Array length and header length match' + '\n'
+
         except AssertionError as a:
             msg = "Array length and header length mismatch."
+            self.log_file_str += msg
+            self.write_log_file()
             #logger.critical(msg)
             #logger.critical(a)
             raise AssertionError(msg)
 
         try:
             if self.type_model == 'fiscal':
+
+                self.log_file_str += 'self.type_model = fiscal' + '\n'
+
                 self.data_object = load(
                     open(self.model_path + '/data_object_fiscal.obj', 'rb')
                 )
+
+                self.log_file_str += 'data_object_fiscal.obj successfully loaded' + '\n'
+
                 self.model = load(
                     open(self.model_path + '/rf_model_fiscal.pkl', 'rb')
                 )
+
+                self.log_file_str += 'rf_model_fiscal.pkl successfully loaded' + '\n'
+
                 if 'CAL_YEAR' in self.df.columns:
                     self.df.rename(
                         columns={"CAL_YEAR": "FISCAL_YEAR"}, inplace=True
                     )
+
+                self.log_file_str += 'CAL_YEAR renamed to FISCAL_YEAR' + '\n'
+
             elif self.type_model == 'gregorian':
+
+                self.log_file_str += 'self.type_model = gregorian' + '\n'
+
                 self.data_object = load(
                     open(self.model_path + '/data_object_gregorian.obj', 'rb')
                 )
+
+                self.log_file_str += 'data_object_gregorian.obj successfully loaded' + '\n'
+
                 self.model = load(
                     open(self.model_path + '/rf_model_gregorian.pkl', 'rb')
                 )
+
+                self.log_file_str += 'rf_model_gregorian.pkl successfully loaded' + '\n'
+
             else:
                 msg = "Incorrect model flag hardcoded in script."
+                self.log_file_str += msg
+                self.write_log_file()
                 #logger.critical(msg)
                 raise ValueError(msg)
         except FileNotFoundError as f:
             msg = "Pickle files could not be found - either path is wrong or name of pickle files."
+            self.log_file_str += msg
+            self.write_log_file()
             #logger.critical(msg)
             #logger.critical(f)
             raise FileNotFoundError(msg)
@@ -827,6 +859,18 @@ class LivePrediction(object):
         self.cal_year = None
         self.term_as_of_date = None
         self.results = None
+    
+
+    def write_log_file(self):
+
+        #log file name will have a datetime
+        current_datetime_str = datetime.now().strftime('%Y_%m_%d_%H:%M:%S')
+
+        log_file_name_str = self.fortnightly_log_file_path + '/log_file_' + self.type_model + '_' + current_datetime_str + '.tsv'
+
+        with open(log_file_name_str, 'w') as writefile:
+            writefile.write(self.log_file_str)
+    
         
     def save_reporting_columns(self):
         
@@ -838,6 +882,8 @@ class LivePrediction(object):
             self.cal_year = self.df['CAL_YEAR']
         else:
             self.cal_year = self.df['FISCAL_YEAR']
+        
+        self.log_file_str += 'Saved all reporting columns' + '\n'
 
 
     def clean_input(self):
@@ -939,6 +985,9 @@ class LivePrediction(object):
             msg = "The Data is missing some column that was present in training."
 
             print(self.df.columns.tolist())
+
+            self.log_file_str += msg
+            self.write_log_file()
             #logger.critical(msg)
             #logger.critical(k)
             raise KeyError(msg)
@@ -954,6 +1003,8 @@ class LivePrediction(object):
         
         except TypeError as t:
             msg = "Cannot do arithmetic operations on strings."
+            self.log_file_str += msg
+            self.write_log_file()
             #logger.critical(msg)
             #logger.critical(t)
             raise TypeError(msg)
@@ -977,20 +1028,7 @@ class LivePrediction(object):
             one_hot_df = self.df.iloc[:, (tot_col-num_one_hot):(tot_col)]
             one_hot_features = one_hot_df.columns
             var_df = self.df.iloc[:, 0:(tot_col-num_one_hot)]
-
-        #write dataset to DBFS
-        # if self.type_model == 'fiscal':
-        #     var_df.to_csv("/dbfs/FileStore/fiscal_data_before_imputation.csv", index=False)
-        # elif self.type_model == 'gregorian':
-        #     var_df.to_csv("/dbfs/FileStore/gregorian_data_before_imputation.csv", index=False)
-
-        #print("Prediction type: " + self.type_model)
-        #print("Shape: " + str(var_df.shape))
-        #print("Column List: " + str(var_df.columns.tolist()))
-        #print('--------')
         
-        #fill in blank values to avoid generating a ValueError
-        #var_df = var_df.fillna(0)
 
         try:
             pass
@@ -1008,14 +1046,11 @@ class LivePrediction(object):
             # )
         except ValueError as v:
             msg = "Array passed into imputer or normalizer are incorrect lengths."
+            self.log_file_str += msg
+            self.write_log_file()
             #logger.critical(msg)
             #logger.critical(v)
             raise ValueError(msg)
-
-        # if self.type_model == 'fiscal':
-        #     var_df.to_csv("/dbfs/FileStore/fiscal_data_after_imputation.csv", index=False)
-        # elif self.type_model == 'gregorian':
-        #     var_df.to_csv("/dbfs/FileStore/gregorian_data_after_imputation.csv", index=False)
 
         #var_df = pd.DataFrame(
         #    var_array, columns=var_df.columns
@@ -1035,6 +1070,8 @@ class LivePrediction(object):
 
         except AttributeError as a:
             msg = "Incompatible versions of Pandas between Pickle File and VM."
+            self.log_file_str += msg
+            self.write_log_file()
             #logger.critical(msg)
             #logger.critical(a)
             raise AttributeError(msg)
@@ -1052,6 +1089,9 @@ class LivePrediction(object):
         global TEST_MODE_ON
         global MANDATORY_REPORTING_COLUMNS_LIST
 
+        self.log_file_str += '\n' + 'In predict()' + '\n'
+        self.log_file_str += '====================' + '\n'
+
         reporting_column_list = MANDATORY_REPORTING_COLUMNS_LIST.copy()
 
         """ Predict the Attrition likelihood for input data and outputs the results as a tsv. """
@@ -1065,6 +1105,8 @@ class LivePrediction(object):
             self.df = self.df.drop(reporting_column_list, axis=1)
 
             rf_model = RandomForestClassifier(n_estimators = 100, criterion = 'entropy', max_depth = 50, max_features = 20, min_samples_split = 10, ccp_alpha=0.00001)
+
+            self.log_file_str += 'Successfully created RandomForestClassifier' + '\n'
 
             #model training/testing
             [df_train, df_test] = train_test_split(self.df, test_size = 1/3, random_state = 42)
@@ -1085,15 +1127,22 @@ class LivePrediction(object):
             rf_model.fit(x_train, y_train)
             y_test_pred = rf_model.predict(x_test)
 
+            self.log_file_str += 'Successfully trained RandomForestClassifier' + '\n'
+
             train_score = rf_model.score(x_train, y_train)
             test_score = rf_model.score(x_test, y_test)
+
             print("Test score: ", test_score, "Train score: ", train_score)
+            self.log_file_str += 'Train score: ' + str(train_score) + '\n'
+            self.log_file_str += 'Test score: ' + str(test_score) + '\n'
 
             #generate preds and probs for self.df
             #first, extract target
             self.df = self.df.drop(['TERM_NEXT_YEAR'], axis=1)
 
             probs = rf_model.predict_proba(self.df.values)
+
+            self.log_file_str += 'Generated probs successfully' + '\n'
           
             #print('Executed predict_proba successfully')
 
@@ -1102,20 +1151,19 @@ class LivePrediction(object):
             exception_str = repr(v)
             msg = "Array passed into model is of incorrect length."
             print(exception_str)
+            self.log_file_str += msg + ' ' + exception_str
+            self.write_log_file()
             #logger.critical(msg)
             #logger.critical(v)
             raise ValueError(msg)
         except:
             msg = "Unspecified Error when making prediction."
+            self.log_file_str += msg
+            self.write_log_file()
             #logger.critical(msg)
             raise ValueError(msg)
 
         if self.type_model == 'fiscal':
-            
-            print("in fiscal if branch..")
-
-            print("self.business_ids.shape = " + str(self.business_ids.shape))
-            print("self.master_participant_id.shape = " + str(self.master_participant_id.shape))
 
             d = {
                 'BUSINESS_ID': self.business_ids, 'MASTER_PARTICIPANT_ID': self.master_participant_id,
@@ -1128,6 +1176,7 @@ class LivePrediction(object):
 
                 if TEST_MODE_ON == True:
                     self.results.to_csv(self.pred_output_path + "results_test_fiscal.csv", index=False)
+                    self.log_file_str += 'Generated results_test_fiscal.csv successfully: ' + '\n'
                 else:
 
                     df_spark = spark.createDataFrame(self.results)
@@ -1138,28 +1187,29 @@ class LivePrediction(object):
                         .options(**options) \
                         .option("dbtable", "TURNOVER_PRED_FISCAL") \
                         .save()
+                    
+                    self.log_file_str += 'Wrote self.results to Snowflake successfully: ' + '\n'
                 
                 #get today's date and time as a string
                 current_datetime_str = datetime.now().strftime('%Y_%m_%d_%H:%M:%S')
 
                 #write data to Databricks as well, whether we are using a test file or not
                 self.results.to_csv(
-                    self.pred_output_path + '/part_fiscal_pred_' + current_datetime_str + '.tsv',
+                    self.fortnightly_prediction_output_path + '/part_fiscal_pred_' + current_datetime_str + '.tsv',
                     header = None, index=False, sep='\t'
                 )
+
+                self.log_file_str += 'Wrote fortnightly_prediction file successfully: ' + '\n'
                 
             except FileNotFoundError as f:
                 msg = "Fiscal output filepath not found when outputting."
+                self.log_file_str += msg
+                self.write_log_file()
                 #logger.critical(msg)
                 #logger.critical(f)
                 raise FileNotFoundError(msg)
 
         elif self.type_model == 'gregorian':
-
-            print("in gregorian if branch..")
-
-            print("self.business_ids.shape = " + str(self.business_ids.shape))
-            print("self.master_participant_id.shape = " + str(self.master_participant_id.shape))
 
             d = {
                 'BUSINESS_ID': self.business_ids, 'MASTER_PARTICIPANT_ID': self.master_participant_id,
@@ -1172,6 +1222,7 @@ class LivePrediction(object):
                 
                 if TEST_MODE_ON == True:
                     self.results.to_csv(self.pred_output_path + "results_test_gregorian.csv", index=False)
+                    self.log_file_str += 'Generated results_test_gregorian.csv successfully: ' + '\n'
                 else:
 
 
@@ -1183,23 +1234,31 @@ class LivePrediction(object):
                         .options(**options) \
                         .option("dbtable", "TURNOVER_PRED_GREGORIAN") \
                         .save()
+                    
+                    self.log_file_str += 'Wrote self.results to Snowflake successfully: ' + '\n'
                 
                 #get today's date and time as a string
                 current_datetime_str = datetime.now().strftime('%Y_%m_%d_%H:%M:%S')
 
                 #write data to Databricks as well
                 self.results.to_csv(
-                   self.pred_output_path + '/part_gregorian_pred_' + current_datetime_str + '.tsv',
+                   self.fortnightly_prediction_output_path + '/part_gregorian_pred_' + current_datetime_str + '.tsv',
                    header = None, index=False, sep='\t'
                 )
+
+                self.log_file_str += 'Wrote fortnightly_prediction file successfully: ' + '\n'
                
             except FileNotFoundError as f:
                 msg = "Gregorian output filepath not found when outputting."
+                self.log_file_str += msg
+                self.write_log_file()
                 #logger.critical(msg)
                 #logger.critical(f)
                 raise FileNotFoundError(msg)
         print("Predictions outputted successfully.")
         print("SUCCESS.")
+        self.log_file_str += 'Predictions outputted successfully' + '\n'
+        self.log_file_str += 'SUCCESS' + '\n'
 
     def explain_pred(self):
         """ 
@@ -1209,20 +1268,24 @@ class LivePrediction(object):
         global TEST_MODE_ON
 
         print("Explainer started.")
-
-        print("self.results column list = " + str(self.results.columns.tolist()))
+        self.log_file_str += '\n' + 'In explain_pred()' + '\n'
+        self.log_file_str += '====================' + '\n'
 
         shap_exp = shap.TreeExplainer(
             self.model, background=self.data_object.x_train
         )
 
         print("Shap Explainer Created.")
+        self.log_file_str += 'Shap Explainer Created' + '\n'
+
         shap_values_test = shap_exp.shap_values(
             self.df.values, approximate=True,
             check_additivity=False
         )
 
         print("Shap Values Created.")
+        self.log_file_str += 'Shap Values Created' + '\n'
+
         shap_arr = np.zeros(
             self.df.shape
         )
@@ -1230,8 +1293,13 @@ class LivePrediction(object):
             for row in range(len(self.df)):
                 vals = shap_values_test[1][row]
                 shap_arr[row] = vals
+            
+            self.log_file_str += 'shap_arr created' + '\n'
+
         except IndexError as i:
             msg = "No shap values were created from the TreeExplainer."
+            self.log_file_str += msg
+            self.write_log_file()
             #logger.critical(msg)
             #logger.critical(i)
             raise IndexError(msg)
@@ -1252,6 +1320,8 @@ class LivePrediction(object):
             )
         self.results["EXPECTED_VALUE"] = shap_exp.expected_value[1]
 
+        self.log_file_str += 'combined shap values with one-hot-encoded features successfully' + '\n'
+
         #if self.type_model == 'gregorian':
         #    del self.results["COMP_AVG_MONTH_PAYEECOUNT"]
 
@@ -1259,6 +1329,8 @@ class LivePrediction(object):
             self.visual_output_path + '/part_visual_' + self.type_model + '.tsv',
             index=False, sep='\t'
         )
+
+        self.log_file_str += 'wrote shap output file successfully' + '\n'
 
         if TEST_MODE_ON == False:
 
@@ -1279,6 +1351,7 @@ class LivePrediction(object):
                 .save()
 
         print("Explainer ended.")
+        self.log_file_str += 'Explainer ended' + '\n'
 
 # COMMAND ----------
 
@@ -1320,19 +1393,22 @@ if trigger_attrition_flag == 'TRUE' or TEST_MODE_ON == True:
 
     #execute both fiscal and gregorian attrition
 
-    fiscal_args = ["fiscal", fiscal_header_path_cl, fiscal_file_path_cl, fiscal_output_path, fiscal_vis_output_path, model_input_cl]
-    gregorian_args = ["gregorian", gregorian_header_path_cl, gregorian_file_path_cl, gregorian_output_path, gregorian_vis_output_path, model_input_cl]
+    fiscal_args = ["fiscal", fiscal_header_path_cl, fiscal_file_path_cl, fiscal_output_path, fiscal_vis_output_path, model_input_cl, fortnightly_prediction_output_path, fortnightly_log_file_path]
+    gregorian_args = ["gregorian", gregorian_header_path_cl, gregorian_file_path_cl, gregorian_output_path, gregorian_vis_output_path, model_input_cl, fortnightly_prediction_output_path, fortnightly_log_file_path]
 
     for input_lst in [gregorian_args, fiscal_args]:
         batch_pred = LivePrediction(
             input_lst[0], input_lst[1], input_lst[2],
-            input_lst[3], input_lst[4], input_lst[5]
+            input_lst[3], input_lst[4], input_lst[5], input_lst[6], input_lst[7]
         )
 
         #batch_pred.clean_input()
         batch_pred.save_reporting_columns()
         batch_pred.predict()
         batch_pred.explain_pred()
+
+        #write log file
+        batch_pred.write_log_file()
     
     if TEST_MODE_ON == False:
     
