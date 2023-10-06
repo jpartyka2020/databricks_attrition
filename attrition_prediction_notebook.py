@@ -64,6 +64,12 @@ test_gregorian_data_path = ''
 
 # COMMAND ----------
 
+#global log file strings for fiscal and gregorian cleaning and predictions
+fiscal_log_file_str = ""
+gregorian_log_file_str = ""
+
+# COMMAND ----------
+
 #we don't need to supply command line parameters in the Databricks environment
 #we also might not need these -- hmmm...
 
@@ -102,7 +108,7 @@ options = {
 
 class CleanData(object):
 
-    def __init__(self, calendar_type, test_mode=False):
+    def __init__(self, calendar_type, test_mode=False, log_file_str=None):
         self.calendar_type = calendar_type
         self.df = None
         self.num_one_hot = None
@@ -124,7 +130,10 @@ class CleanData(object):
         self.y_test = None
         self.df_mandatory_reporting_columns = None
         self.df_optional_reporting_columns = None
+        self.log_file_str = log_file_str
 
+        
+        self.init_log_file()
         self.load_data() # Reads in csv.
         self.map_categorical()
         self.drop_ids()
@@ -140,6 +149,12 @@ class CleanData(object):
         self.recombine_data()
         self.normalize_data()
         self.select_features()
+    
+    def init_log_file(self):
+        
+        self.log_file_str += "Starting cleaning of " + self.calendar_type + " data" + "\n"
+        self.log_file_str += "=====================" + "\n"
+    
 
     def load_data(self):
         """Read in the data:"""
@@ -154,7 +169,7 @@ class CleanData(object):
         if self.calendar_type == 'fiscal':
 
             if TEST_MODE_ON == True:
-                self.df = pd.read_csv('/dbfs/FileStore/attrition_test_data/gregorian_attrition.tsv', sep='\t')
+                self.df = pd.read_csv('/dbfs/FileStore/attrition_test_data/fiscal_attrition.tsv', sep='\t')
             else:
                 #read attrition data from Snowflake
                 self.df = spark.read \
@@ -163,14 +178,6 @@ class CleanData(object):
                         .option("dbtable","MERGE_FEATURE_FISCAL") \
                         .load().toPandas()
             
-            print("Fiscal Data")
-            print("------------")
-            print("Shape: " + str(self.df.shape))
-            print("------------")
-            print(self.df.columns.tolist())
-            print("------------")
-            
-
             dtypes_series = self.df.dtypes
 
             dtypes_dict = dtypes_series.apply(lambda x: x.name).to_dict()
@@ -179,24 +186,18 @@ class CleanData(object):
             self.df['BUSINESS_ID'] = self.df['BUSINESS_ID'].astype('int')           
             
             print('Loaded Fiscal Data')
+            self.log_file_str += "Just loaded data successfully" + "\n"
         
         elif self.calendar_type == 'gregorian':
 
             if TEST_MODE_ON == True:
-                self.df = pd.read_csv('/dbfs/FileStore/attrition_test_data/fiscal_attrition.tsv', sep='\t')
+                self.df = pd.read_csv('/dbfs/FileStore/attrition_test_data/gregorian_attrition.tsv', sep='\t')
             else:
                 self.df = spark.read \
                         .format("snowflake") \
                         .options(**options) \
                         .option("dbtable","MERGE_FEATURE_GREGORIAN") \
                         .load().toPandas()
-            
-            print("Gregorian Data")
-            print("------------")
-            print("Shape: " + str(self.df.shape))
-            print("------------")
-            print(self.df.columns.tolist())
-            print("------------")
 
             dtypes_series = self.df.dtypes
 
@@ -204,7 +205,10 @@ class CleanData(object):
             self.df = self.df.astype(dtypes_dict)
 
             print('Loaded Gregorian Data')
+            self.log_file_str += "Just loaded data successfully" + "\n"
+
         else:
+            self.log_file_str += "Could not load data" + "\n"
             raise NameError('HiThere')
 
         #assign datatypes to each column in self.df
@@ -220,6 +224,8 @@ class CleanData(object):
         
         print("Loaded data datatypes" + str(self.df.dtypes))
         print("Loaded Data:", self.df.shape)
+        self.log_file_str += "Loaded data types successfully" + "\n"
+    
 
     def map_categorical(self):
         """Mappings to consolidate categorical variables:"""
@@ -240,10 +246,11 @@ class CleanData(object):
                                     'Manufacturing': 'Manufacturing', 'High-Tech Manufacturing': 'Manufacturing',
                                     'Energy': 'Government/Public Sector', 'Other': 'Government/Public Sector', 'Government/Public Sector': 'Government/Public Sector'})
         print("Mapped Categorical:", self.df.shape)
+        self.log_file_str += "Mapped categorical data successfully" + "\n"
+    
     
     def drop_ids(self):
         """Remove ids for dependent variables where all 0's or 1's:"""
-        print("df shape at top:" + str(self.df.shape))
 
         df = self.df.groupby(['BUSINESS_ID', 'TERM_NEXT_YEAR'])['TERM_NEXT_YEAR'].count()
         business_ids = df.index.get_level_values('BUSINESS_ID')
@@ -297,6 +304,8 @@ class CleanData(object):
 
         self.df = self.df.loc[~self.df['BUSINESS_ID'].isin(ids)]
         print("Dropped IDs:", self.df.shape)
+        self.log_file_str += "Dropped IDs successfully" + "\n"
+    
     
     def drop_columns(self):
 
@@ -304,8 +313,6 @@ class CleanData(object):
         global OPTIONAL_REPORTING_COLUMNS
 
         #first drop mandatory and optional reporting columns - we will re-merge mandatory columns at the end
-        self.df.to_csv("/dbfs/FileStore/attrition_test_data/mandatory_col_check_start.csv", index=False)
-
         self.df_mandatory_reporting_columns = self.df[MANDATORY_REPORTING_COLUMNS_LIST]
         self.df = self.df.drop(MANDATORY_REPORTING_COLUMNS_LIST, axis=1)
         
@@ -331,7 +338,8 @@ class CleanData(object):
         self.df = pd.concat([self.df_mandatory_reporting_columns, self.df], axis=1)        
 
         #self.df.drop(['BUSINESS_ID', 'HIRE_AS_OF_DATE', 'TITLE_NAME_YR_END','CAL_YEAR', 'MASTER_PARTICIPANT_ID'], axis = 1, inplace = True)
-        #print("Dropped Columns:", self.df.shape)
+        print("Dropped Columns:", self.df.shape)
+        self.log_file_str += "Just dropped sparse columns successfully" + "\n"
 
     def one_hot_encode_categorical(self):
 
@@ -342,12 +350,15 @@ class CleanData(object):
             self.df = pd.concat([self.df, pd.get_dummies(self.df[feature], prefix = feature)], axis=1)
             self.df.drop([feature], axis = 1, inplace = True)
         print("One Hot Encode:", self.df.shape)
+        self.log_file_str += "One-hot encoding completed successfully" + "\n"
+    
 
     def set_dependent_last(self):
         # Set the Dependent variable as last in the set: 
         self.df  = self.df[[c for c in self.df.columns if c not in ['TERM_NEXT_YEAR']] +
                              ['TERM_NEXT_YEAR']]
         print("Set Dependent Last.")
+        self.log_file_str += "Set dependent variable last successfully" + "\n"
     
     def seperate_categorical_numeric(self):
         self.tot_col = self.df.shape[1]
@@ -355,6 +366,7 @@ class CleanData(object):
         self.var_df = self.df.iloc[:, 0:(self.tot_col-self.num_one_hot-1)]
         self.one_hot_df.reset_index(drop = True, inplace = True)
         print("Seperate Numeric DF, Categorical DF.")
+        self.log_file_str += "Separated numeric and categorical DFs successfully" + "\n"
 
         print("var_df shape:")
         print(self.var_df.shape)
@@ -382,10 +394,9 @@ class CleanData(object):
 
         self.var_df = pd.DataFrame(X_new, columns = self.var_df.columns)
         print("Outliers Removed:")
-        print("Number of rows at end of outlier_removal: " + str(len(self.df)))
+        self.log_file_str += "Outliers removed successfully" + "\n"
     
     def reset_index(self):
-        print('In reset index...')
        
         # Resetting the index for each respective dataframe:
         self.df.reset_index(drop = True, inplace = True)
@@ -400,6 +411,7 @@ class CleanData(object):
 
         print("Indeces Reset.")
         print("Number of rows at end of reset_index: " + str(len(self.df)))
+        self.log_file_str += "Indices reset successfully" + "\n"
         
 
     def split_data(self):
@@ -407,11 +419,7 @@ class CleanData(object):
         self.train_idx = self.train.index
         self.test_idx = self.test.index
         print("Data split.")
-
-        print("Size of self.train: " + str(len(self.train)))
-        print("Size of self.test: " + str(len(self.test)))
-        print("Size of self.train_idx: " + str(len(self.train_idx)))
-        print("Size of self.test_idx: " + str(len(self.test_idx)))
+        self.log_file_str += "Data split successfully" + "\n"
         
 
     def add_difference_variables(self):
@@ -423,10 +431,7 @@ class CleanData(object):
         self.test['DIFF_QUOTA_AMT_USD'] = self.test['MAX_QUOTA_AMT_USD'] - self.test['MIN_QUOTA_AMT_USD']
         print("Difference Variables Created.")
 
-        print("Size of self.train: " + str(len(self.train)))
-        print("Size of self.test: " + str(len(self.test)))
-        print("Size of self.train_idx: " + str(len(self.train_idx)))
-        print("Size of self.test_idx: " + str(len(self.test_idx)))
+        self.log_file_str += "Difference variables created successfully" + "\n"
 
     def impute_data(self):
 
@@ -460,6 +465,7 @@ class CleanData(object):
         self.test = pd.DataFrame(x_test, columns = test_columns_list)
 
         print("Data Imputed.")
+        self.log_file_str += "Data imputed successfully" + "\n"
 
     def recombine_data(self):
 
@@ -487,6 +493,7 @@ class CleanData(object):
         print(self.train.info())
         print(self.test.info())
         print('Remerged Dataframes.')
+        self.log_file_str += "Remerged dataframes successfully" + "\n"
 
     @staticmethod
     def normalize_x(self, x_train, x_test, ignore_cols):
@@ -509,8 +516,6 @@ class CleanData(object):
     def normalize_data(self):
 
         global TEST_MODE_ON
-
-        self.train.to_csv("/dbfs/FileStore/attrition_test_data/self_train_top_normalize_data.csv", index=False)
 
         # Split the Data/Normalize based off of percentage:
         self.tot_col = self.train.shape[1]
@@ -536,6 +541,7 @@ class CleanData(object):
         self.test = pd.DataFrame(self.x_test, columns = columns)
 
         print("Normalized Data.")
+        self.log_file_str += "Normalized data successfully" + "\n"
 
 
     def select_features(self):
@@ -580,6 +586,7 @@ class CleanData(object):
 
         print("Selected Features.")
         print(self.df)
+        self.log_file_str += "Selected features successfully" + "\n"
     
     def save_data_object(self):
         self.df = None
@@ -599,12 +606,17 @@ class CleanData(object):
             path = '/dbfs/FileStore/pickleFiles/data_object_fiscal.obj'
             file_out = open(path, 'wb')
             dump(self, file_out)
+            self.log_file_str += "Saved fiscal data object successfully" + "\n"
         elif self.calendar_type == 'gregorian':
             path = '/dbfs/FileStore/pickleFiles/data_object_gregorian.obj'
             file_out = open(path, 'wb')
             dump(self, file_out)
+            self.log_file_str += "Saved gregorian data object successfully" + "\n"
         else:
             raise ValueError("Wrong name.")
+    
+    def get_log_file(self):
+        return self.log_file_str
 
 # COMMAND ----------
 
@@ -740,7 +752,7 @@ class RandomForest(object):
 class LivePrediction(object):
     """ Creates a prediction object that can then be used to clean the data and output prediction. """
 
-    def __init__(self, type_model, header_path, data_path, pred_output_path, visual_output_path, model_path, fortnightly_prediction_output_path, fortnightly_log_file_path):
+    def __init__(self, type_model, header_path, data_path, pred_output_path, visual_output_path, model_path, fortnightly_prediction_output_path, fortnightly_log_file_path, log_file_str):
         """
         Initialized the LivePrediction Class.
 
@@ -765,7 +777,9 @@ class LivePrediction(object):
         self.fortnightly_log_file_path = fortnightly_log_file_path
 
         #we will log events using a string
-        self.log_file_str = "Start attrition model run: " + datetime.now().strftime('%Y_%m_%d_%H:%M:%S') + '\n\n' 
+        self.log_file_str = log_file_str
+        self.log_file_str += "Start attrition model run: " + datetime.now().strftime('%Y_%m_%d_%H:%M:%S') + '\n'
+        self.log_file_str += "====================" + "\n"
 
         try:
         
@@ -1370,7 +1384,7 @@ trigger_attrition_flag = df_trigger_attrition.loc[0, 'VALUE']
 if trigger_attrition_flag == 'TRUE' or TEST_MODE_ON == True:
 
     #create cleaning object for gregorian predictions - but only for real files
-    gregorian_data = CleanData('gregorian', test_mode=TEST_MODE_ON)
+    gregorian_data = CleanData('gregorian', test_mode=TEST_MODE_ON, log_file_str=fiscal_log_file_str)
     rfModelGregorian = RandomForest(gregorian_data, 'RandomForest')
     rfModelGregorian.predict()
     rfModelGregorian.predict_final()
@@ -1380,7 +1394,7 @@ if trigger_attrition_flag == 'TRUE' or TEST_MODE_ON == True:
     print("Finished all gregorian stuff, on to fiscal stuff....")
 
     #create cleaning object for fiscal predictions
-    fiscal_data = CleanData('fiscal', test_mode=TEST_MODE_ON)
+    fiscal_data = CleanData('fiscal', test_mode=TEST_MODE_ON, log_file_str=gregorian_log_file_str)
     rfModelFiscal = RandomForest(fiscal_data, 'RandomForest')
     rfModelFiscal.predict()
     rfModelFiscal.predict_final()
@@ -1391,15 +1405,24 @@ if trigger_attrition_flag == 'TRUE' or TEST_MODE_ON == True:
     print("let's start making predictions....")
     print('----------')
 
+    #get log files from CleanData objects
+    fiscal_log_file_str = fiscal_data.get_log_file()
+    gregorian_log_file_str = gregorian_data.get_log_file()
+
+    #add line breaks for prediction portion of logging statements
+    fiscal_log_file_str += "\n" + "====================" + "\n"
+    gregorian_log_file_str += "\n" + "====================" + "\n"
+
     #execute both fiscal and gregorian attrition
 
-    fiscal_args = ["fiscal", fiscal_header_path_cl, fiscal_file_path_cl, fiscal_output_path, fiscal_vis_output_path, model_input_cl, fortnightly_prediction_output_path, fortnightly_log_file_path]
-    gregorian_args = ["gregorian", gregorian_header_path_cl, gregorian_file_path_cl, gregorian_output_path, gregorian_vis_output_path, model_input_cl, fortnightly_prediction_output_path, fortnightly_log_file_path]
+    fiscal_args = ["fiscal", fiscal_header_path_cl, fiscal_file_path_cl, fiscal_output_path, fiscal_vis_output_path, model_input_cl, fortnightly_prediction_output_path, fortnightly_log_file_path, fiscal_log_file_str]
+    gregorian_args = ["gregorian", gregorian_header_path_cl, gregorian_file_path_cl, gregorian_output_path, gregorian_vis_output_path, model_input_cl, fortnightly_prediction_output_path, fortnightly_log_file_path, gregorian_log_file_str]
 
     for input_lst in [gregorian_args, fiscal_args]:
         batch_pred = LivePrediction(
             input_lst[0], input_lst[1], input_lst[2],
-            input_lst[3], input_lst[4], input_lst[5], input_lst[6], input_lst[7]
+            input_lst[3], input_lst[4], input_lst[5], 
+            input_lst[6], input_lst[7], input_lst[8]
         )
 
         #batch_pred.clean_input()
