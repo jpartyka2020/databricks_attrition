@@ -46,19 +46,17 @@ print("sklearn version:", sklearn.__version__)
 
 # COMMAND ----------
 
-#read fiscal attrition data
-df_attrition = spark.read.csv("dbfs:/FileStore/fiscal_attrition_with_headers.tsv", header=True, sep='\t').toPandas()
-
 MAX_COL = 56
 
  #save cols into mandatory_reporting_columns and optional_reporting_columns for proper file processing within CleanData
 OPTIONAL_REPORTING_COLUMNS_LIST = ['HOME_CITY', 'HOME_STATE_PROVINCE', 'HOME_COUNTRY_CODE','HIRE_AS_OF_DATE', 'TITLE_NAME_YR_END']
-MANDATORY_REPORTING_COLUMNS_LIST = ['BUSINESS_ID', 'CAL_YEAR', 'TERM_AS_OF_DATE', 'MASTER_PARTICIPANT_ID']
+MANDATORY_REPORTING_COLUMNS_GREGORIAN = ['BUSINESS_ID', 'CAL_YEAR', 'TERM_AS_OF_DATE', 'MASTER_PARTICIPANT_ID']
+MANDATORY_REPORTING_COLUMNS_FISCAL = ['BUSINESS_ID', 'FISCAL_YEAR', 'TERM_AS_OF_DATE', 'MASTER_PARTICIPANT_ID']
 
 # COMMAND ----------
 
 #constants to control how this notebook is run
-TEST_MODE_ON = True
+TEST_MODE_ON = False
 test_fiscal_data_path = ''
 test_gregorian_data_path = ''
 
@@ -74,9 +72,9 @@ gregorian_log_file_str = ""
 #we also might not need these -- hmmm...
 
 gregorian_header_path_cl = ''
-gregorian_file_path_cl = '/dbfs/FileStore/attrition_test_data/cleaned_fiscal_data.tsv'
+gregorian_file_path_cl = '/dbfs/FileStore/attrition_test_data/cleaned_gregorian_data.tsv'
 fiscal_header_path_cl = ''
-fiscal_file_path_cl = '/dbfs/FileStore/attrition_test_data/cleaned_gregorian_data.tsv'
+fiscal_file_path_cl = '/dbfs/FileStore/attrition_test_data/cleaned_fiscal_data.tsv'
 gregorian_output_path = '/dbfs/FileStore/prediction_output/'
 gregorian_vis_output_path = '/dbfs/FileStore/visual_output/'
 fiscal_output_path = '/dbfs/FileStore/prediction_output/'
@@ -95,8 +93,19 @@ password = "Xactly123"
 
 #Connect to Snowflake
 
+# options = {
+#   "sfUrl": "https://xactly-xactly_engg_datalake.snowflakecomputing.com/",
+#   "sfUser": user,
+#   "sfPassword": password,
+#   "sfDatabase": "XTLY_ENGG",
+#   "sfSchema": "INSIGHTS",
+#   "sfWarehouse": "DIS_LOAD_WH"
+# }
+
+#Connect to Snowflake
+
 options = {
-  "sfUrl": "https://xactly-xactly_engg_datalake.snowflakecomputing.com/",
+  "sfUrl": "https://xactly-xactly_engg_datalake_aws.snowflakecomputing.com/",
   "sfUser": user,
   "sfPassword": password,
   "sfDatabase": "XTLY_ENGG",
@@ -128,12 +137,17 @@ class CleanData(object):
         self.x_test = None
         self.y_train = None
         self.y_test = None
-        self.df_mandatory_reporting_columns = None
-        self.df_optional_reporting_columns = None
-        self.log_file_str = log_file_str
 
-        
+        self.df_mandatory_reporting_columns = None 
+        self.df_optional_reporting_columns = None
+        self.mandatory_reporting_columns_list = []
+        self.log_file_str = log_file_str
+        self.major_train_columns_list = []
+        self.major_test_columns_list = []
+
         self.init_log_file()
+        self.init_reporting_columns()
+        self.init_train_test_columns()
         self.load_data() # Reads in csv.
         self.map_categorical()
         self.drop_ids()
@@ -155,6 +169,26 @@ class CleanData(object):
         self.log_file_str += "Starting cleaning of " + self.calendar_type + " data" + "\n"
         self.log_file_str += "=====================" + "\n"
     
+    def init_reporting_columns(self):
+
+        global MANDATORY_REPORTING_COLUMNS_GREGORIAN
+        global MANDATORY_REPORTING_COLUMNS_FISCAL
+
+        if self.calendar_type == "gregorian":
+            self.mandatory_reporting_columns_list = MANDATORY_REPORTING_COLUMNS_GREGORIAN
+        else:
+            self.mandatory_reporting_columns_list = MANDATORY_REPORTING_COLUMNS_FISCAL
+    
+
+    def init_train_test_columns(self):
+
+        if self.calendar_type == "gregorian":
+            self.major_train_columns_list = ['BUSINESS_ID', 'CAL_YEAR', 'TERM_AS_OF_DATE', 'MASTER_PARTICIPANT_ID']
+            self.major_test_columns_list = ['BUSINESS_ID', 'CAL_YEAR', 'TERM_AS_OF_DATE', 'MASTER_PARTICIPANT_ID']
+        else:
+            self.major_train_columns_list = ['BUSINESS_ID', 'FISCAL_YEAR', 'TERM_AS_OF_DATE', 'MASTER_PARTICIPANT_ID']
+            self.major_test_columns_list = ['BUSINESS_ID', 'FISCAL_YEAR', 'TERM_AS_OF_DATE', 'MASTER_PARTICIPANT_ID']
+
 
     def load_data(self):
         """Read in the data:"""
@@ -177,6 +211,9 @@ class CleanData(object):
                         .options(**options) \
                         .option("dbtable","MERGE_FEATURE_FISCAL") \
                         .load().toPandas()
+                
+                #print("shape of Snowflake dataset: " + str(self.df.shape))
+                #sys.exit(0)
             
             dtypes_series = self.df.dtypes
 
@@ -198,6 +235,10 @@ class CleanData(object):
                         .options(**options) \
                         .option("dbtable","MERGE_FEATURE_GREGORIAN") \
                         .load().toPandas()
+                
+                #print("shape of Snowflake dataset: " + str(self.df.shape))
+                #sys.exit(0)
+                
 
             dtypes_series = self.df.dtypes
 
@@ -225,6 +266,8 @@ class CleanData(object):
         print("Loaded data datatypes" + str(self.df.dtypes))
         print("Loaded Data:", self.df.shape)
         self.log_file_str += "Loaded data types successfully" + "\n"
+
+        print("self.df.columns.tolist() = " + str(self.df.columns.tolist()))
     
 
     def map_categorical(self):
@@ -274,7 +317,11 @@ class CleanData(object):
         self.df = self.df.loc[self.df['BUSINESS_ID'].isin(effective_ids)]
 
         if self.calendar_type == 'fiscal':
-            df = self.df.groupby(['BUSINESS_ID', 'CAL_YEAR', 'TERM_NEXT_YEAR'])[['TERM_NEXT_YEAR']].count()
+
+            print("For fiscal preds: cols = " + str(self.df.columns.tolist()))
+            print('------')
+
+            df = self.df.groupby(['BUSINESS_ID', 'FISCAL_YEAR', 'TERM_NEXT_YEAR'])[['TERM_NEXT_YEAR']].count()
         else:
             df = self.df.groupby(['BUSINESS_ID', 'CAL_YEAR', 'TERM_NEXT_YEAR'])[['TERM_NEXT_YEAR']].count()
 
@@ -309,12 +356,15 @@ class CleanData(object):
     
     def drop_columns(self):
 
-        global MANDATORY_REPORTING_COLUMNS
         global OPTIONAL_REPORTING_COLUMNS
 
+        print("in drop_columns....")
+        print("self.df.columns.tolist() = " + str(self.df.columns.tolist()))
+        print('--------')
+
         #first drop mandatory and optional reporting columns - we will re-merge mandatory columns at the end
-        self.df_mandatory_reporting_columns = self.df[MANDATORY_REPORTING_COLUMNS_LIST]
-        self.df = self.df.drop(MANDATORY_REPORTING_COLUMNS_LIST, axis=1)
+        self.df_mandatory_reporting_columns = self.df[self.mandatory_reporting_columns_list]
+        self.df = self.df.drop(self.mandatory_reporting_columns_list, axis=1)
         
         #not all of the optional reporting columns might be in the file
         optional_columns_in_file_list = []
@@ -335,9 +385,8 @@ class CleanData(object):
         print(self.dropped_columns)
 
         #merge back mandatory reporting_columns
-        self.df = pd.concat([self.df_mandatory_reporting_columns, self.df], axis=1)        
+        self.df = pd.concat([self.df_mandatory_reporting_columns, self.df], axis=1)
 
-        #self.df.drop(['BUSINESS_ID', 'HIRE_AS_OF_DATE', 'TITLE_NAME_YR_END','CAL_YEAR', 'MASTER_PARTICIPANT_ID'], axis = 1, inplace = True)
         print("Dropped Columns:", self.df.shape)
         self.log_file_str += "Just dropped sparse columns successfully" + "\n"
 
@@ -393,6 +442,7 @@ class CleanData(object):
         X_new = np.concatenate((X, Y), axis = 1)
 
         self.var_df = pd.DataFrame(X_new, columns = self.var_df.columns)
+
         print("Outliers Removed:")
         self.log_file_str += "Outliers removed successfully" + "\n"
     
@@ -415,6 +465,7 @@ class CleanData(object):
         
 
     def split_data(self):
+
         [self.train, self.test] = train_test_split(self.var_df, test_size = 1/3, random_state = 42)
         self.train_idx = self.train.index
         self.test_idx = self.test.index
@@ -435,18 +486,17 @@ class CleanData(object):
 
     def impute_data(self):
 
-        global MANDATORY_REPORTING_COLUMNS_LIST
+        print("In impute data")
 
-        #remove reporting columns for now from self.train and self.test
-        npa_train_mandatory_reporting_columns = self.train[MANDATORY_REPORTING_COLUMNS_LIST].values
-        self.train = self.train.drop(MANDATORY_REPORTING_COLUMNS_LIST, axis=1)
+        npa_train_mandatory_reporting_columns = self.train[self.mandatory_reporting_columns_list].values
+        self.train = self.train.drop(self.mandatory_reporting_columns_list, axis=1)
 
-        train_columns_list = ['BUSINESS_ID', 'CAL_YEAR', 'TERM_AS_OF_DATE', 'MASTER_PARTICIPANT_ID'] + self.train.columns.tolist()
+        train_columns_list = self.major_train_columns_list + self.train.columns.tolist()
 
-        npa_test_mandatory_reporting_columns = self.test[MANDATORY_REPORTING_COLUMNS_LIST].values
-        self.test = self.test.drop(MANDATORY_REPORTING_COLUMNS_LIST, axis=1)
+        npa_test_mandatory_reporting_columns = self.test[self.mandatory_reporting_columns_list].values
+        self.test = self.test.drop(self.mandatory_reporting_columns_list, axis=1)
 
-        test_columns_list = ['BUSINESS_ID', 'CAL_YEAR', 'TERM_AS_OF_DATE', 'MASTER_PARTICIPANT_ID'] + self.test.columns.tolist()
+        test_columns_list = self.major_test_columns_list + self.test.columns.tolist()
 
         # Iterative approach to filling in null values:
         x_train = self.train.values
@@ -478,9 +528,6 @@ class CleanData(object):
         
         self.train = pd.merge(self.train, one_hot_train, left_index=True, right_index=True)
         self.test = pd.merge(self.test, one_hot_test, left_index=True, right_index=True)
-        
-        #self.train = pd.concat([self.train, one_hot_train], axis = 1)
-        #self.test = pd.concat([self.test, one_hot_test], axis = 1)
 
         # Block code below in cell for Dependent Inclusive approach to null values:
         dep_train = self.df.iloc[self.train_idx, self.tot_col-1]
@@ -515,8 +562,6 @@ class CleanData(object):
 
     def normalize_data(self):
 
-        global TEST_MODE_ON
-
         # Split the Data/Normalize based off of percentage:
         self.tot_col = self.train.shape[1]
         X_ = self.train.values
@@ -529,9 +574,8 @@ class CleanData(object):
 
         ignore = np.arange((self.tot_col-self.num_one_hot-1), (self.tot_col-1))
         
-        #add the 4 reporting columns to the list of ignored columns if using a test file
-        if TEST_MODE_ON == True:
-            ignore = np.concatenate((np.array([0,1,2,3]), ignore))
+        #add the 4 reporting columns to the list of ignored columns 
+        ignore = np.concatenate((np.array([0,1,2,3]), ignore))
         
         self.x_train, self.x_test = self.normalize_x(self, self.x_train, self.x_test, ignore_cols = ignore)
 
@@ -546,7 +590,6 @@ class CleanData(object):
 
     def select_features(self):
 
-        global MANDATORY_REPORTING_COLUMNS_LIST
         global TEST_MODE_ON
 
         selected_feat = ['PR_TARGET_USD', 'SALARY_USD', 'COUNT_MONTH_EMPLOYED_TIL_DEC',
@@ -561,8 +604,7 @@ class CleanData(object):
 
         categ_col = self.train.iloc[:, (len(self.train.columns) - self.num_one_hot):]
 
-        if TEST_MODE_ON == True:
-            self.features= np.concatenate((MANDATORY_REPORTING_COLUMNS_LIST, selected_feat, categ_col.columns))
+        self.features = np.concatenate((self.mandatory_reporting_columns_list, selected_feat, categ_col.columns))
 
         # Query out Selected Feat (if wanted):
         self.train = self.train[self.features]
@@ -639,8 +681,6 @@ class RandomForest(object):
         
     def predict(self):
 
-        global TEST_MODE_ON
-
         npa_reporting_columns = None
         npa_reporting_col_data_test = None
 
@@ -657,30 +697,35 @@ class RandomForest(object):
             # Create Random Forest Model:
             self.rf = RandomForestClassifier(n_estimators = 100, criterion = 'entropy', max_depth = 50, max_features = 20, min_samples_split = 10, ccp_alpha=0.00001)
             
-            if TEST_MODE_ON == True:
-                #we need to separate out the reporting columns before doing any fitting
-                npa_reporting_col_data_train = self.x_train[:, :4]
-                self.x_train = self.x_train[:, 4:]
-                npa_reporting_col_data_test = self.x_test[:, :4]
-                self.x_test = self.x_test[:, 4:]
+            #we need to separate out the reporting columns before doing any fitting
+            npa_reporting_col_data_train = self.x_train[:, :4]
+            self.x_train = self.x_train[:, 4:]
+            npa_reporting_col_data_test = self.x_test[:, :4]
+            self.x_test = self.x_test[:, 4:]
 
+            #reshape y_train and y_test
+            self.y_train = self.y_train.reshape(-1,1)
+            self.y_test = self.y_test.reshape(-1,1)
+            
+            print("calendar type is: " + str(self.calendar_type))
+        
             self.rf.fit(self.x_train, self.y_train)
             y_test_pred = self.rf.predict(self.x_test)
             train_score = self.rf.score(self.x_train, self.y_train)
             test_score = self.rf.score(self.x_test, self.y_test)
             print("Test score: ", test_score, "Train score: ", train_score)
 
+            print("Predictions executed successfully!")
+
             #add reporting cols back if necessary
-            if TEST_MODE_ON == True:
-                self.x_train = np.hstack((npa_reporting_col_data_train, self.x_train))
-                self.x_test = np.hstack((npa_reporting_col_data_test, self.x_test))
+            self.x_train = np.hstack((npa_reporting_col_data_train, self.x_train))
+            self.x_test = np.hstack((npa_reporting_col_data_test, self.x_test))
+            print("Predict activities finished!")
               
         self.nightly_file.write("Training Score: " + str(train_score) + ", Test Score: " + str(test_score)) 
         self.auc()
 
     def auc(self):
-
-        global TEST_MODE_ON
 
         npa_reporting_col_data_test = None
 
@@ -692,9 +737,8 @@ class RandomForest(object):
         elif self.model_type == 'RandomForest':
 
             #strip out reporting columns, and then re-merge them at bottom
-            if TEST_MODE_ON == True:
-                npa_reporting_col_data_test = self.x_test[:, :4]
-                self.x_test = self.x_test[:, 4:]
+            npa_reporting_col_data_test = self.x_test[:, :4]
+            self.x_test = self.x_test[:, 4:]
 
             y_test_probs = self.rf.predict_proba(self.x_test)    
             y_test_binary = label_binarize(self.y_test, classes = [0, 1])
@@ -702,27 +746,38 @@ class RandomForest(object):
             auc = roc_auc_score(y_test_binary, y_test_probs)
 
             #re-merge reporting columns
-            if TEST_MODE_ON == True:
-                self.x_test = np.hstack((npa_reporting_col_data_test, self.x_test))
+            self.x_test = np.hstack((npa_reporting_col_data_test, self.x_test))
 
+        print("AUC: " + str(auc))
         self.nightly_file.write(", AUC: " + str(auc))
         self.nightly_file.close()
 
     def predict_final(self):
         """Need to have model train on entire dataset."""
-        global TEST_MODE_ON
-        global MANDATORY_REPORTING_COLUMNS_LIST
+        
+        #global TEST_MODE_ON
+        #global MANDATORY_REPORTING_COLUMNS_LIST
 
-        df_mandatory_reporting_columns = None
+        #df_mandatory_reporting_columns = None
 
         #strip out reporting columns
-        if TEST_MODE_ON == True:
-            df_mandatory_reporting_columns = self.df[MANDATORY_REPORTING_COLUMNS_LIST]
-            self.df = self.df.drop(MANDATORY_REPORTING_COLUMNS_LIST, axis=1)
+        #if TEST_MODE_ON == True:
+        #df_mandatory_reporting_columns = self.df[MANDATORY_REPORTING_COLUMNS_LIST]
+        #self.df = self.df.drop(MANDATORY_REPORTING_COLUMNS_LIST, axis=1)
  
         # All data needs to be trained on:
         X = self.df.drop(['TERM_NEXT_YEAR'], axis = 1).values
         Y = self.df['TERM_NEXT_YEAR'].values
+
+        #remove reporting columns
+        npa_reporting_col_data_test = X[:, :4]
+        X = X[:, 4:]
+
+        #round all values in X to 3 digits after the decimal point
+        X = np.round(X, 3)
+
+        #self.df.to_csv("/dbfs/FileStore/attrition_test_data/self_df_predict_final.csv", index=False)
+
         if self.model_type == 'DecisionTree':
             self.dt = DecisionTreeClassifier(criterion = 'entropy', max_depth = 100, min_samples_split = 20, ccp_alpha = 0.00001)
             self.dt.fit(X, Y)
@@ -731,8 +786,7 @@ class RandomForest(object):
             self.rf.fit(X, Y)
         
         #re-merge reporting columns
-        if TEST_MODE_ON == True:
-            self.df = pd.concat([df_mandatory_reporting_columns, self.df], axis=1)
+        #self.df = pd.concat([df_mandatory_reporting_columns, self.df], axis=1)
 
     def save_model(self):
         """Saves the model as a pickle file to be utilized."""
@@ -784,6 +838,8 @@ class LivePrediction(object):
         try:
         
             self.df = pd.read_csv(self.data_path, sep='\t')
+
+            print(self.df.columns.tolist())
 
             if self.df.shape[1] == MAX_COL:
                 self.df = self.df.iloc[:, 0:-2]
@@ -904,8 +960,6 @@ class LivePrediction(object):
         """ Cleans the input in the same manner as the training of the model. """
 
         global TEST_MODE_ON
-
-        self.df.to_csv("/dbfs/FileStore/attrition_test_data/top_of_clean_input.csv", index=False)
 
         #Drop unused features, save to object BUSINESS_ID, MASTER_PARTICIPANT_ID:
         try:
@@ -1188,6 +1242,12 @@ class LivePrediction(object):
                 
                 self.results = pd.DataFrame(d)
 
+                #convert BUSINESS_ID, MASTER_PARTICIPANT_ID and FISCAL_YEAR to type int
+                self.results.columns = ['BUSINESS_ID', 'MASTER_PARTICIPANT_ID', 'FISCAL_YEAR', 'PRED_TERM_PROB']
+                columns_to_convert = ['BUSINESS_ID', 'MASTER_PARTICIPANT_ID', 'FISCAL_YEAR']
+                
+                self.results[columns_to_convert] = self.results[columns_to_convert].astype(int)
+
                 if TEST_MODE_ON == True:
                     self.results.to_csv(self.pred_output_path + "results_test_fiscal.csv", index=False)
                     self.log_file_str += 'Generated results_test_fiscal.csv successfully: ' + '\n'
@@ -1210,7 +1270,7 @@ class LivePrediction(object):
                 #write data to Databricks as well, whether we are using a test file or not
                 self.results.to_csv(
                     self.fortnightly_prediction_output_path + '/part_fiscal_pred_' + current_datetime_str + '.tsv',
-                    header = None, index=False, sep='\t'
+                    index=False, sep='\t'
                 )
 
                 self.log_file_str += 'Wrote fortnightly_prediction file successfully: ' + '\n'
@@ -1233,6 +1293,12 @@ class LivePrediction(object):
             try:
 
                 self.results = pd.DataFrame(d)
+                self.results.columns = ['BUSINESS_ID', 'MASTER_PARTICIPANT_ID', 'CAL_YEAR', 'PRED_TERM_PROB']
+
+                #convert BUSINESS_ID, MASTER_PARTICIPANT_ID and CAL_YEAR to type int
+                columns_to_convert = ['BUSINESS_ID', 'MASTER_PARTICIPANT_ID', 'CAL_YEAR']
+
+                self.results[columns_to_convert] = self.results[columns_to_convert].astype(int)
                 
                 if TEST_MODE_ON == True:
                     self.results.to_csv(self.pred_output_path + "results_test_gregorian.csv", index=False)
@@ -1257,7 +1323,7 @@ class LivePrediction(object):
                 #write data to Databricks as well
                 self.results.to_csv(
                    self.fortnightly_prediction_output_path + '/part_gregorian_pred_' + current_datetime_str + '.tsv',
-                   header = None, index=False, sep='\t'
+                   index=False, sep='\t'
                 )
 
                 self.log_file_str += 'Wrote fortnightly_prediction file successfully: ' + '\n'
@@ -1339,8 +1405,11 @@ class LivePrediction(object):
         #if self.type_model == 'gregorian':
         #    del self.results["COMP_AVG_MONTH_PAYEECOUNT"]
 
+        #get today's date and time as a string
+        current_datetime_str = datetime.now().strftime('%Y_%m_%d_%H:%M:%S')
+
         self.results.to_csv(
-            self.visual_output_path + '/part_visual_' + self.type_model + '.tsv',
+            self.visual_output_path + '/part_visual_' + self.type_model + "_" + current_datetime_str +  '.tsv',
             index=False, sep='\t'
         )
 
@@ -1376,15 +1445,15 @@ df_trigger_attrition = spark.read \
                     .option("dbtable","INSIGHTS_PARAMETER") \
                     .load().toPandas()
 
-#display(df_trigger_attrition)
-
 #if the flag is False,then we don't execute attrition
 trigger_attrition_flag = df_trigger_attrition.loc[0, 'VALUE']
 
-if trigger_attrition_flag == 'TRUE' or TEST_MODE_ON == True:
+print(trigger_attrition_flag)
+
+if trigger_attrition_flag == 'FALSE' or TEST_MODE_ON == True:
 
     #create cleaning object for gregorian predictions - but only for real files
-    gregorian_data = CleanData('gregorian', test_mode=TEST_MODE_ON, log_file_str=fiscal_log_file_str)
+    gregorian_data = CleanData('gregorian', test_mode=TEST_MODE_ON, log_file_str=gregorian_log_file_str)
     rfModelGregorian = RandomForest(gregorian_data, 'RandomForest')
     rfModelGregorian.predict()
     rfModelGregorian.predict_final()
@@ -1394,7 +1463,7 @@ if trigger_attrition_flag == 'TRUE' or TEST_MODE_ON == True:
     print("Finished all gregorian stuff, on to fiscal stuff....")
 
     #create cleaning object for fiscal predictions
-    fiscal_data = CleanData('fiscal', test_mode=TEST_MODE_ON, log_file_str=gregorian_log_file_str)
+    fiscal_data = CleanData('fiscal', test_mode=TEST_MODE_ON, log_file_str=fiscal_log_file_str)
     rfModelFiscal = RandomForest(fiscal_data, 'RandomForest')
     rfModelFiscal.predict()
     rfModelFiscal.predict_final()
