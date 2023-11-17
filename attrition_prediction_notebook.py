@@ -46,6 +46,9 @@ print("sklearn version:", sklearn.__version__)
 
 # COMMAND ----------
 
+#read fiscal attrition data
+#df_attrition = spark.read.csv("dbfs:/FileStore/fiscal_attrition_with_headers.tsv", header=True, sep='\t').toPandas()
+
 MAX_COL = 56
 
  #save cols into mandatory_reporting_columns and optional_reporting_columns for proper file processing within CleanData
@@ -56,7 +59,7 @@ MANDATORY_REPORTING_COLUMNS_FISCAL = ['BUSINESS_ID', 'FISCAL_YEAR', 'TERM_AS_OF_
 # COMMAND ----------
 
 #constants to control how this notebook is run
-TEST_MODE_ON = False
+TEST_MODE_ON = True
 test_fiscal_data_path = ''
 test_gregorian_data_path = ''
 
@@ -93,25 +96,24 @@ password = "Xactly123"
 
 #Connect to Snowflake
 
-# options = {
-#   "sfUrl": "https://xactly-xactly_engg_datalake.snowflakecomputing.com/",
-#   "sfUser": user,
-#   "sfPassword": password,
-#   "sfDatabase": "XTLY_ENGG",
-#   "sfSchema": "INSIGHTS",
-#   "sfWarehouse": "DIS_LOAD_WH"
-# }
-
-#Connect to Snowflake
-
 options = {
   "sfUrl": "https://xactly-xactly_engg_datalake_aws.snowflakecomputing.com/",
   "sfUser": user,
   "sfPassword": password,
   "sfDatabase": "XTLY_ENGG",
   "sfSchema": "INSIGHTS",
-  "sfWarehouse": "DIS_LOAD_WH"
+  "sfWarehouse": "DIS_LOAD_WH",
+  "truncate_table" : "ON",
+  "usestagingtable" : "OFF",
 }
+
+# COMMAND ----------
+
+#truncate all attrition snowflake tables before starting by calling the attrition_truncate_snowflake_tables notebook
+truncate_success = dbutils.notebook.run("attrition_truncate_snowflake_tables", 60)
+
+if truncate_success != "success":
+    sys.exit(0)
 
 # COMMAND ----------
 
@@ -194,6 +196,7 @@ class CleanData(object):
         """Read in the data:"""
 
         global TEST_MODE_ON
+        global options
 
         int_col_list = ['MASTER_PARTICIPANT_ID','CAL_YEAR','HIRE_AS_OF_DATE','COUNT_UNIQ_TITLE_NAME','COUNT_UNIQ_MGR_ID', 'COUNT_MONTHS_GOT_PAYMENT', 'TERM_NEXT_YEAR']
 
@@ -502,9 +505,11 @@ class CleanData(object):
         x_train = self.train.values
         x_test = self.test.values
 
+        #imputer code. - do not alter
         self.imp = IterativeImputer(max_iter = 10, random_state = 42, initial_strategy = 'mean', estimator = BayesianRidge())
         x_train = self.imp.fit_transform(x_train)
         x_test = self.imp.transform(x_test)
+        
         #self.imp = x_train.mean(axis = 0)
 
         #prepend reporting columns as NumPY arrays using hstack
@@ -599,8 +604,8 @@ class CleanData(object):
                     'MIN_CREDIT_AMT_USD', 'DIFF_QUOTA_AMT_USD', 'COUNT_UNIQ_TITLE_NAME', 'COUNT_UNIQ_MGR_ID']
         
         #do we need this as a selected feature?
-        if self.calendar_type == 'gregorian':
-            selected_feat.append('COMP_AVG_MONTH_PAYEECOUNT')
+        #if self.calendar_type == 'gregorian':
+        #    selected_feat.append('COMP_AVG_MONTH_PAYEECOUNT')
 
         categ_col = self.train.iloc[:, (len(self.train.columns) - self.num_one_hot):]
 
@@ -695,7 +700,7 @@ class RandomForest(object):
             print("Test score: ", test_score, "Train score: ", train_score)
         elif self.model_type == 'RandomForest':
             # Create Random Forest Model:
-            self.rf = RandomForestClassifier(n_estimators = 100, criterion = 'entropy', max_depth = 50, max_features = 20, min_samples_split = 10, ccp_alpha=0.00001)
+            self.rf = RandomForestClassifier(n_estimators = 100, criterion = 'entropy', max_depth = 50, max_features = 20, min_samples_split = 10, ccp_alpha=0.00001, random_state=42)
             
             #we need to separate out the reporting columns before doing any fitting
             npa_reporting_col_data_train = self.x_train[:, :4]
@@ -755,7 +760,6 @@ class RandomForest(object):
     def predict_final(self):
         """Need to have model train on entire dataset."""
         
-        #global TEST_MODE_ON
         #global MANDATORY_REPORTING_COLUMNS_LIST
 
         #df_mandatory_reporting_columns = None
@@ -829,6 +833,7 @@ class LivePrediction(object):
         self.model_path = model_path
         self.fortnightly_prediction_output_path = fortnightly_prediction_output_path
         self.fortnightly_log_file_path = fortnightly_log_file_path
+        self.mandatory_reporting_columns_list = []
 
         #we will log events using a string
         self.log_file_str = log_file_str
@@ -943,6 +948,9 @@ class LivePrediction(object):
     
         
     def save_reporting_columns(self):
+
+        global MANDATORY_REPORTING_COLUMNS_FISCAL
+        global MANDATORY_REPORTING_COLUMNS_GREGORIAN
         
         self.business_ids = self.df['BUSINESS_ID']
         self.master_participant_id = self.df['MASTER_PARTICIPANT_ID']
@@ -950,8 +958,10 @@ class LivePrediction(object):
 
         if self.type_model == "gregorian":
             self.cal_year = self.df['CAL_YEAR']
+            self.mandatory_reporting_columns_list = MANDATORY_REPORTING_COLUMNS_GREGORIAN
         else:
             self.cal_year = self.df['FISCAL_YEAR']
+            self.mandatory_reporting_columns_list = MANDATORY_REPORTING_COLUMNS_FISCAL
         
         self.log_file_str += 'Saved all reporting columns' + '\n'
 
@@ -1155,24 +1165,23 @@ class LivePrediction(object):
     def predict(self):
 
         global TEST_MODE_ON
-        global MANDATORY_REPORTING_COLUMNS_LIST
 
         self.log_file_str += '\n' + 'In predict()' + '\n'
         self.log_file_str += '====================' + '\n'
 
-        reporting_column_list = MANDATORY_REPORTING_COLUMNS_LIST.copy()
+        reporting_column_list = self.mandatory_reporting_columns_list.copy()
 
         """ Predict the Attrition likelihood for input data and outputs the results as a tsv. """
         try:
             
             if self.type_model == "fiscal":
-                cal_year_idx = reporting_column_list.index("CAL_YEAR")
+                cal_year_idx = reporting_column_list.index("FISCAL_YEAR")
                 reporting_column_list[cal_year_idx] = "FISCAL_YEAR"
 
             df_mandatory_reporting_columns = self.df[reporting_column_list]
             self.df = self.df.drop(reporting_column_list, axis=1)
 
-            rf_model = RandomForestClassifier(n_estimators = 100, criterion = 'entropy', max_depth = 50, max_features = 20, min_samples_split = 10, ccp_alpha=0.00001)
+            rf_model = RandomForestClassifier(n_estimators = 100, criterion = 'entropy', max_depth = 50, max_features = 20, min_samples_split = 10, ccp_alpha=0.00001, random_state=42)
 
             self.log_file_str += 'Successfully created RandomForestClassifier' + '\n'
 
@@ -1257,7 +1266,7 @@ class LivePrediction(object):
 
                     df_spark.write \
                         .format("snowflake") \
-                        .mode("overwrite") \
+                        .mode("append") \
                         .options(**options) \
                         .option("dbtable", "TURNOVER_PRED_FISCAL") \
                         .save()
@@ -1310,7 +1319,7 @@ class LivePrediction(object):
 
                     df_spark.write \
                         .format("snowflake") \
-                        .mode("overwrite") \
+                        .mode("append") \
                         .options(**options) \
                         .option("dbtable", "TURNOVER_PRED_GREGORIAN") \
                         .save()
@@ -1346,6 +1355,7 @@ class LivePrediction(object):
         DO NOT RUN - Need to import SHAP
         """
         global TEST_MODE_ON
+        global options
 
         print("Explainer started.")
         self.log_file_str += '\n' + 'In explain_pred()' + '\n'
@@ -1428,7 +1438,7 @@ class LivePrediction(object):
 
             df_spark.write \
                 .format("snowflake") \
-                .mode("overwrite") \
+                .mode("append") \
                 .options(**options) \
                 .option("dbtable",snowflake_table_name) \
                 .save()
@@ -1450,7 +1460,7 @@ trigger_attrition_flag = df_trigger_attrition.loc[0, 'VALUE']
 
 print(trigger_attrition_flag)
 
-if trigger_attrition_flag == 'FALSE' or TEST_MODE_ON == True:
+if trigger_attrition_flag == 'TRUE' or TEST_MODE_ON == True:
 
     #create cleaning object for gregorian predictions - but only for real files
     gregorian_data = CleanData('gregorian', test_mode=TEST_MODE_ON, log_file_str=gregorian_log_file_str)
@@ -1512,7 +1522,7 @@ if trigger_attrition_flag == 'FALSE' or TEST_MODE_ON == True:
 
         df_spark_trigger_attrition.write \
             .format("snowflake") \
-            .mode("overwrite") \
+            .mode("append") \
             .options(**options) \
             .option("dbtable", "INSIGHTS_PARAMETER") \
             .save()
