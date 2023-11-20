@@ -59,7 +59,7 @@ MANDATORY_REPORTING_COLUMNS_FISCAL = ['BUSINESS_ID', 'FISCAL_YEAR', 'TERM_AS_OF_
 # COMMAND ----------
 
 #constants to control how this notebook is run
-TEST_MODE_ON = True
+TEST_MODE_ON = False
 test_fiscal_data_path = ''
 test_gregorian_data_path = ''
 
@@ -113,6 +113,7 @@ options = {
 truncate_success = dbutils.notebook.run("attrition_truncate_snowflake_tables", 60)
 
 if truncate_success != "success":
+    print("Not able to truncate Snowflake tables...stopping execution")
     sys.exit(0)
 
 # COMMAND ----------
@@ -674,6 +675,8 @@ class RandomForest(object):
         self.y_train = CleanData.y_train
         self.y_test = CleanData.y_test
         self.df = CleanData.df
+        self.rf_max_features = -1
+
         self.calendar_type = CleanData.calendar_type
         self.model_type = model_type
         self.rf = None
@@ -700,7 +703,17 @@ class RandomForest(object):
             print("Test score: ", test_score, "Train score: ", train_score)
         elif self.model_type == 'RandomForest':
             # Create Random Forest Model:
-            self.rf = RandomForestClassifier(n_estimators = 100, criterion = 'entropy', max_depth = 50, max_features = 20, min_samples_split = 10, ccp_alpha=0.00001, random_state=42)
+            
+            #the max_features value needs to be fluid, due to changing data and a changing number of predictors
+            #we need to remove the 4 reporting features - remember that the target feature is NOT included in self.x_train
+            rf_max_features = int(self.x_train.shape[1]) - 4
+
+            self.rf_max_features = rf_max_features 
+            
+            #print("rf_max_features is: " + str(rf_max_features))
+            #sys.exit(0)
+
+            self.rf = RandomForestClassifier(n_estimators = 100, criterion = 'entropy', max_depth = 50, max_features = self.rf_max_features, min_samples_split = 10, ccp_alpha=0.00001, random_state=42)
             
             #we need to separate out the reporting columns before doing any fitting
             npa_reporting_col_data_train = self.x_train[:, :4]
@@ -713,6 +726,7 @@ class RandomForest(object):
             self.y_test = self.y_test.reshape(-1,1)
             
             print("calendar type is: " + str(self.calendar_type))
+            print("x_train shape is: " + str(self.x_train.shape))
         
             self.rf.fit(self.x_train, self.y_train)
             y_test_pred = self.rf.predict(self.x_test)
@@ -786,7 +800,7 @@ class RandomForest(object):
             self.dt = DecisionTreeClassifier(criterion = 'entropy', max_depth = 100, min_samples_split = 20, ccp_alpha = 0.00001)
             self.dt.fit(X, Y)
         elif self.model_type == 'RandomForest':
-            self.rf = RandomForestClassifier(n_estimators = 100, criterion = 'entropy', max_depth = 50, max_features = 20, min_samples_split = 10, ccp_alpha=0.00001)
+            self.rf = RandomForestClassifier(n_estimators = 100, criterion = 'entropy', max_depth = 50, max_features = self.rf_max_features, min_samples_split = 10, ccp_alpha=0.00001)
             self.rf.fit(X, Y)
         
         #re-merge reporting columns
@@ -1180,8 +1194,12 @@ class LivePrediction(object):
 
             df_mandatory_reporting_columns = self.df[reporting_column_list]
             self.df = self.df.drop(reporting_column_list, axis=1)
+            rf_max_features = len(self.df.columns.tolist()) - 1
 
-            rf_model = RandomForestClassifier(n_estimators = 100, criterion = 'entropy', max_depth = 50, max_features = 20, min_samples_split = 10, ccp_alpha=0.00001, random_state=42)
+            #print(self.df.columns.tolist())
+            #sys.exit(0)
+
+            rf_model = RandomForestClassifier(n_estimators = 100, criterion = 'entropy', max_depth = 50, max_features = rf_max_features, min_samples_split = 10, ccp_alpha=0.00001, random_state=42)
 
             self.log_file_str += 'Successfully created RandomForestClassifier' + '\n'
 
