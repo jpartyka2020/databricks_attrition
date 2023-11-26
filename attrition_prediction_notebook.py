@@ -10,6 +10,8 @@ import sys
 import logging
 import warnings
 import os
+
+ 
 import shap
 import sklearn as sk
 
@@ -59,7 +61,7 @@ MANDATORY_REPORTING_COLUMNS_FISCAL = ['BUSINESS_ID', 'FISCAL_YEAR', 'TERM_AS_OF_
 # COMMAND ----------
 
 #constants to control how this notebook is run
-TEST_MODE_ON = False
+TEST_MODE_ON = True
 test_fiscal_data_path = ''
 test_gregorian_data_path = ''
 
@@ -360,7 +362,7 @@ class CleanData(object):
     
     def drop_columns(self):
 
-        global OPTIONAL_REPORTING_COLUMNS
+        global OPTIONAL_REPORTING_COLUMNS_LIST
 
         print("in drop_columns....")
         print("self.df.columns.tolist() = " + str(self.df.columns.tolist()))
