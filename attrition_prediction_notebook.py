@@ -61,7 +61,7 @@ MANDATORY_REPORTING_COLUMNS_FISCAL = ['BUSINESS_ID', 'FISCAL_YEAR', 'TERM_AS_OF_
 # COMMAND ----------
 
 #constants to control how this notebook is run
-TEST_MODE_ON = True
+TEST_MODE_ON = False
 test_fiscal_data_path = ''
 test_gregorian_data_path = ''
 
@@ -301,6 +301,8 @@ class CleanData(object):
     def drop_ids(self):
         """Remove ids for dependent variables where all 0's or 1's:"""
 
+        print("Shape at top of function: " + str(self.df.shape))
+
         df = self.df.groupby(['BUSINESS_ID', 'TERM_NEXT_YEAR'])['TERM_NEXT_YEAR'].count()
         business_ids = df.index.get_level_values('BUSINESS_ID')
 
@@ -320,7 +322,7 @@ class CleanData(object):
             if seen[x] == 1:
                 ineffective_ids.append(x)
 
-        self.df = self.df.loc[self.df['BUSINESS_ID'].isin(effective_ids)]
+        #self.df = self.df.loc[self.df['BUSINESS_ID'].isin(effective_ids)]
 
         if self.calendar_type == 'fiscal':
 
@@ -355,7 +357,8 @@ class CleanData(object):
                 ineffective_ids.append(pair)
         ids = [i[0] for i in ineffective_ids]
 
-        self.df = self.df.loc[~self.df['BUSINESS_ID'].isin(ids)]
+        #self.df = self.df.loc[~self.df['BUSINESS_ID'].isin(ids)]
+
         print("Dropped IDs:", self.df.shape)
         self.log_file_str += "Dropped IDs successfully" + "\n"
     
@@ -497,10 +500,14 @@ class CleanData(object):
         npa_train_mandatory_reporting_columns = self.train[self.mandatory_reporting_columns_list].values
         self.train = self.train.drop(self.mandatory_reporting_columns_list, axis=1)
 
+        self.train.fillna(self.train.mean(), inplace=True)
+
         train_columns_list = self.major_train_columns_list + self.train.columns.tolist()
 
         npa_test_mandatory_reporting_columns = self.test[self.mandatory_reporting_columns_list].values
         self.test = self.test.drop(self.mandatory_reporting_columns_list, axis=1)
+
+        self.test.fillna(self.test.mean(), inplace=True)
 
         test_columns_list = self.major_test_columns_list + self.test.columns.tolist()
 
@@ -711,9 +718,6 @@ class RandomForest(object):
             rf_max_features = int(self.x_train.shape[1]) - 4
 
             self.rf_max_features = rf_max_features 
-            
-            #print("rf_max_features is: " + str(rf_max_features))
-            #sys.exit(0)
 
             self.rf = RandomForestClassifier(n_estimators = 100, criterion = 'entropy', max_depth = 50, max_features = self.rf_max_features, min_samples_split = 10, ccp_alpha=0.00001, random_state=42)
             
