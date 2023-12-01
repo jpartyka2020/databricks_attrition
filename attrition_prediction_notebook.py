@@ -155,7 +155,7 @@ class CleanData(object):
         self.init_train_test_columns()
         self.load_data() # Reads in csv.
         self.map_categorical()
-        self.drop_ids()
+        #self.drop_ids()
         self.drop_columns()
         self.one_hot_encode_categorical()
         self.set_dependent_last()
@@ -322,7 +322,7 @@ class CleanData(object):
             if seen[x] == 1:
                 ineffective_ids.append(x)
 
-        #self.df = self.df.loc[self.df['BUSINESS_ID'].isin(effective_ids)]
+        self.df = self.df.loc[self.df['BUSINESS_ID'].isin(effective_ids)]
 
         if self.calendar_type == 'fiscal':
 
@@ -357,7 +357,7 @@ class CleanData(object):
                 ineffective_ids.append(pair)
         ids = [i[0] for i in ineffective_ids]
 
-        #self.df = self.df.loc[~self.df['BUSINESS_ID'].isin(ids)]
+        self.df = self.df.loc[~self.df['BUSINESS_ID'].isin(ids)]
 
         print("Dropped IDs:", self.df.shape)
         self.log_file_str += "Dropped IDs successfully" + "\n"
