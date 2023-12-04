@@ -63,6 +63,7 @@ MANDATORY_REPORTING_COLUMNS_FISCAL = ['BUSINESS_ID', 'FISCAL_YEAR', 'TERM_AS_OF_
 #constants to control how this notebook is run
 TEST_MODE_ON = False
 USE_IMP_TRAIN_TEST_DATASET = True
+USE_BRENNAN_MODEL = True
 
 # COMMAND ----------
 
@@ -1181,9 +1182,10 @@ class LivePrediction(object):
             self.df = self.df[self.data_object.features]
         
         print("Cleaned Data Successfully.")
-    
 
     def get_external_train_test_data(self):
+
+        global USE_BRENNAN_MODEL
         
         #load outside train_test data
         df_external_data = None
@@ -1198,8 +1200,12 @@ class LivePrediction(object):
         df_industry = pd.get_dummies(df_external_data['INDUSTRY'], prefix='INDUSTRY')
         df_ownership = pd.get_dummies(df_external_data['OWNERSHIP'], prefix='OWNERSHIP')
 
-
-        industry_column_list = ['INDUSTRY_SaaS & Cloud']
+        if USE_BRENNAN_MODEL == True:
+            industry_column_list = ['INDUSTRY_SaaS & Cloud','INDUSTRY_Business Services','INDUSTRY_Communications', 'INDUSTRY_Life Sciences & Pharma', 
+                                    'INDUSTRY_Manufacturing', 'INDUSTRY_Retail']
+        else:
+            industry_column_list = ['INDUSTRY_SaaS & Cloud']
+        
         ownership_column_list = ['OWNERSHIP_Public','OWNERSHIP_Private']
 
         df_industry = df_industry[industry_column_list] 
@@ -1242,7 +1248,7 @@ class LivePrediction(object):
         df_external_data = df_external_data[index_reporting_columns]
         
         #filter extraneous columns from df_external_data
-        train_test_column_list = ['PR_TARGET_USD', 'SALARY_USD', 'COUNT_MONTH_EMPLOYED_TIL_DEC', 'COUNT_MONTHS_GOT_PAYMENT', 'LAST_PAYMENT_UNTIL_YR_END', 'YEAR_PAYMENT', 'COUNT_UNIQ_QUOTA', 'COUNT_AVG_MONTH_PAID_QUOTA', 'LAST_QUOTA_PAID_UNTIL_YR_END', 'SUM_CREDIT_AMT_USD', 'MIN_CREDIT_AMT_USD', 'DIFF_QUOTA_AMT_USD', 'COUNT_UNIQ_TITLE_NAME', 'COUNT_UNIQ_MGR_ID', 'TITLE_CATEGORY_YR_END_ACCOUNT_EXECUTIVE', 'TITLE_CATEGORY_YR_END_CONSULTANT', 'TITLE_CATEGORY_YR_END_DIRECTOR', 'TITLE_CATEGORY_YR_END_MANAGER', 'TITLE_CATEGORY_YR_END_REPRESENTATIVE', 'INDUSTRY_SaaS & Cloud', 'OWNERSHIP_Public', 'OWNERSHIP_private', 'TERM_NEXT_YEAR']
+        train_test_column_list = ['PR_TARGET_USD', 'SALARY_USD', 'COUNT_MONTH_EMPLOYED_TIL_DEC', 'COUNT_MONTHS_GOT_PAYMENT', 'LAST_PAYMENT_UNTIL_YR_END', 'YEAR_PAYMENT', 'COUNT_UNIQ_QUOTA', 'COUNT_AVG_MONTH_PAID_QUOTA', 'LAST_QUOTA_PAID_UNTIL_YR_END', 'SUM_CREDIT_AMT_USD', 'MIN_CREDIT_AMT_USD', 'DIFF_QUOTA_AMT_USD', 'COUNT_UNIQ_TITLE_NAME', 'COUNT_UNIQ_MGR_ID', 'TITLE_CATEGORY_YR_END_ACCOUNT_EXECUTIVE', 'TITLE_CATEGORY_YR_END_CONSULTANT', 'TITLE_CATEGORY_YR_END_DIRECTOR', 'TITLE_CATEGORY_YR_END_MANAGER', 'TITLE_CATEGORY_YR_END_REPRESENTATIVE', 'OWNERSHIP_Public', 'OWNERSHIP_private', 'TERM_NEXT_YEAR'] + industry_column_list
 
         df_external_data = df_external_data[train_test_column_list]
 
@@ -1259,6 +1265,7 @@ class LivePrediction(object):
 
         global TEST_MODE_ON
         global USE_IMP_TRAIN_TEST_DATASET
+        global USE_BRENNAN_MODEL
 
         self.log_file_str += '\n' + 'In predict()' + '\n'
         self.log_file_str += '====================' + '\n'
@@ -1274,7 +1281,6 @@ class LivePrediction(object):
 
             df_mandatory_reporting_columns = self.df[reporting_column_list]
             self.df = self.df.drop(reporting_column_list, axis=1)
-            rf_max_features = len(self.df.columns.tolist()) - 1
 
             df_train = None
             df_test = None
@@ -1289,6 +1295,10 @@ class LivePrediction(object):
                 [df_external_train, df_external_test] = self.get_external_train_test_data()
                 [df_train, df_test] = train_test_split(self.df, test_size = 1/3, random_state = 42)
 
+                #rename OWNERSHIP_Private to OWNERSHIP_private, to adhere to standard naming conventions throughtout this code
+                df_train = df_train.rename(columns={"OWNERSHIP_Private":"OWNERSHIP_private"})
+                df_test = df_test.rename(columns={"OWNERSHIP_Private":"OWNERSHIP_private"})
+
                 df_external_train_target = df_external_train[['TERM_NEXT_YEAR']]
                 df_external_train = df_external_train.drop(['TERM_NEXT_YEAR'], axis=1)
 
@@ -1297,6 +1307,20 @@ class LivePrediction(object):
 
             else:
                 [df_train, df_test] = train_test_split(self.df, test_size = 1/3, random_state = 42)
+            
+            #select only industry columns approved for Matt Brennan's model
+            if USE_BRENNAN_MODEL == True:
+                industry_column_list = ['INDUSTRY_SaaS & Cloud','INDUSTRY_Business Services','INDUSTRY_Communications', 'INDUSTRY_Life Sciences & Pharma', 'INDUSTRY_Manufacturing', 'INDUSTRY_Retail']
+            else:
+                industry_column_list = ['INDUSTRY_SaaS & Cloud']
+            
+            #filter df_train and df_test
+            train_test_column_list = ['PR_TARGET_USD', 'SALARY_USD', 'COUNT_MONTH_EMPLOYED_TIL_DEC', 'COUNT_MONTHS_GOT_PAYMENT', 'LAST_PAYMENT_UNTIL_YR_END', 'YEAR_PAYMENT', 'COUNT_UNIQ_QUOTA', 'COUNT_AVG_MONTH_PAID_QUOTA', 'LAST_QUOTA_PAID_UNTIL_YR_END', 'SUM_CREDIT_AMT_USD', 'MIN_CREDIT_AMT_USD', 'DIFF_QUOTA_AMT_USD', 'COUNT_UNIQ_TITLE_NAME', 'COUNT_UNIQ_MGR_ID', 'TITLE_CATEGORY_YR_END_ACCOUNT_EXECUTIVE', 'TITLE_CATEGORY_YR_END_CONSULTANT', 'TITLE_CATEGORY_YR_END_DIRECTOR', 'TITLE_CATEGORY_YR_END_MANAGER', 'TITLE_CATEGORY_YR_END_REPRESENTATIVE', 'OWNERSHIP_Public', 'OWNERSHIP_private', 'TERM_NEXT_YEAR'] + industry_column_list
+
+            df_train = df_train[train_test_column_list]
+            df_test = df_test[train_test_column_list]
+            
+            rf_max_features = len(df_train.columns.tolist()) - 1
 
             rf_model = RandomForestClassifier(n_estimators = 100, criterion = 'entropy', max_depth = 50, max_features = rf_max_features, min_samples_split = 10, ccp_alpha=0.00001, random_state=42)
 
@@ -1313,6 +1337,7 @@ class LivePrediction(object):
             test_score = None
 
             if USE_IMP_TRAIN_TEST_DATASET == True:
+
                 x_external_train = df_external_train.values
                 y_external_train = df_external_train_target.values
 
@@ -1348,6 +1373,21 @@ class LivePrediction(object):
             #generate preds and probs for self.df
             #first, extract target
             self.df = self.df.drop(['TERM_NEXT_YEAR'], axis=1)
+
+            #rename OWNERSHIP_Private to OWNERSHIP_private
+            self.df = self.df.rename(columns={"OWNERSHIP_Private":"OWNERSHIP_private"})
+
+            #next, ensure that self.df is using the same columns as Matt Brennan did when he first built this model
+            if USE_BRENNAN_MODEL == True:
+                industry_column_list = ['INDUSTRY_SaaS & Cloud','INDUSTRY_Business Services','INDUSTRY_Communications', 'INDUSTRY_Life Sciences & Pharma', 'INDUSTRY_Manufacturing', 'INDUSTRY_Retail']
+            else:
+                industry_column_list = ['INDUSTRY_SaaS & Cloud']
+            
+            #filter df_train and df_test
+            train_test_column_list = ['PR_TARGET_USD', 'SALARY_USD', 'COUNT_MONTH_EMPLOYED_TIL_DEC', 'COUNT_MONTHS_GOT_PAYMENT', 'LAST_PAYMENT_UNTIL_YR_END', 'YEAR_PAYMENT', 'COUNT_UNIQ_QUOTA', 'COUNT_AVG_MONTH_PAID_QUOTA', 'LAST_QUOTA_PAID_UNTIL_YR_END', 'SUM_CREDIT_AMT_USD', 'MIN_CREDIT_AMT_USD', 'DIFF_QUOTA_AMT_USD', 'COUNT_UNIQ_TITLE_NAME', 'COUNT_UNIQ_MGR_ID', 'TITLE_CATEGORY_YR_END_ACCOUNT_EXECUTIVE', 'TITLE_CATEGORY_YR_END_CONSULTANT', 'TITLE_CATEGORY_YR_END_DIRECTOR', 'TITLE_CATEGORY_YR_END_MANAGER', 'TITLE_CATEGORY_YR_END_REPRESENTATIVE', 'OWNERSHIP_Public', 'OWNERSHIP_private'] + industry_column_list
+
+            #ensure that self.df is using the correct columns for predictions
+            self.df = self.df[train_test_column_list]
 
             probs = rf_model.predict_proba(self.df.values)
 
