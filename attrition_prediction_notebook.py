@@ -62,12 +62,13 @@ MANDATORY_REPORTING_COLUMNS_FISCAL = ['BUSINESS_ID', 'FISCAL_YEAR', 'TERM_AS_OF_
 
 #constants to control how this notebook is run
 TEST_MODE_ON = False
-test_fiscal_data_path = ''
-test_gregorian_data_path = ''
+USE_IMP_TRAIN_TEST_DATASET = True
 
 # COMMAND ----------
 
-#global log file strings for fiscal and gregorian cleaning and predictions
+#global log file strings for fiscal and gregorian test dataset, cleaning and predictions
+test_fiscal_data_path = ''
+test_gregorian_data_path = ''
 fiscal_log_file_str = ""
 gregorian_log_file_str = ""
 
@@ -300,8 +301,6 @@ class CleanData(object):
     
     def drop_ids(self):
         """Remove ids for dependent variables where all 0's or 1's:"""
-
-        print("Shape at top of function: " + str(self.df.shape))
 
         df = self.df.groupby(['BUSINESS_ID', 'TERM_NEXT_YEAR'])['TERM_NEXT_YEAR'].count()
         business_ids = df.index.get_level_values('BUSINESS_ID')
@@ -1113,6 +1112,7 @@ class LivePrediction(object):
                     + len(np.unique(self.df['OWNERSHIP'].dropna())))
 
         for feature in ['TITLE_CATEGORY_YR_END', 'INDUSTRY', 'OWNERSHIP']:
+            
             self.df = pd.concat(
                 [self.df, pd.get_dummies(self.df[feature], prefix=feature)], axis=1
             )
@@ -1181,10 +1181,84 @@ class LivePrediction(object):
             self.df = self.df[self.data_object.features]
         
         print("Cleaned Data Successfully.")
+    
+
+    def get_external_train_test_data(self):
+        
+        #load outside train_test data
+        df_external_data = None
+
+        if self.type_model == "fiscal":
+            df_external_data = pd.read_csv('/dbfs/FileStore/attrition_test_data/fiscal_attrition.tsv', sep='\t')
+        
+        if self.type_model == "gregorian":
+            df_external_data = pd.read_csv('/dbfs/FileStore/attrition_test_data/gregorian_attrition.tsv', sep='\t')
+        
+        #create one-hot-encoded variables for Industry and Ownership
+        df_industry = pd.get_dummies(df_external_data['INDUSTRY'], prefix='INDUSTRY')
+        df_ownership = pd.get_dummies(df_external_data['OWNERSHIP'], prefix='OWNERSHIP')
+
+
+        industry_column_list = ['INDUSTRY_SaaS & Cloud']
+        ownership_column_list = ['OWNERSHIP_Public','OWNERSHIP_Private']
+
+        df_industry = df_industry[industry_column_list] 
+        df_ownership = df_ownership[ownership_column_list]
+
+        #rename OWNERSHIP_Private
+        df_ownership = df_ownership.rename(columns={'OWNERSHIP_Private':'OWNERSHIP_private'})
+
+        #drop industry and ownership columns in df_external_data
+        df_external_data = df_external_data.drop(['INDUSTRY','OWNERSHIP'], axis=1)
+
+        #map values in TITLE_CATEGORY_YR_END column of df_external_data
+        df_external_data['TITLE_CATEGORY_YR_END'] = df_external_data['TITLE_CATEGORY_YR_END'].map(
+                    {'ACCOUNT_EXECUTIVE': 'ACCOUNT_EXECUTIVE', 'ACCOUNT_MANAGER': 'ACCOUNT_EXECUTIVE',
+                    'FIELD_SALES_REPRESENTATIVE': 'REPRESENTATIVE', 'INSIDE_SALES_REPRESENTATIVE': 'REPRESENTATIVE', 'LEAD_GENERATION_REPRESENTATIVE': 'REPRESENTATIVE',
+                    'BUSINESS_DEVELOPMENT_ALLIANCE_PARTNERSHIP_REP': 'REPRESENTATIVE', 'SERVICES_REPRESENTATIVE': 'REPRESENTATIVE',
+                    'CUSTOMER_SUCCESS_REPRESENTATIVE': 'REPRESENTATIVE', 'CHANNEL_SALES_REPRESENTATIVE': 'REPRESENTATIVE',
+                    'SALES_SYSTEMS_APPLICATIONS_ENGINEER': 'CONSULTANT', 'SALES_SUPPORT_OPERATIONS': 'CONSULTANT', 'PRE_SALES_CONSULTANT': 'CONSULTANT',
+                    'PRODUCT_INDUSTRY_SPECIALIST': 'CONSULTANT', 'SALES_MANAGER': 'MANAGER', 'SERVICES_MANAGER': 'MANAGER', 'STRATEGIC_KEY_GLOBAL_ACCOUNT_MANAGER': 'MANAGER',
+                    'MANAGER_SALES_SYSTEMS_APPLICATION_ENGINEERING': 'MANAGER', 'MANAGER_CHANNEL_SALES': 'MANAGER', 'MANAGER_BUSINESS_DEVELOPMENT_ALLIANCE_PARTNERSHIPS': 'MANAGER',
+                    'MANAGER_INSIDE_SALES': 'MANAGER', 'MANAGER_LEAD_GENERATION': 'MANAGER', 'SALES_DIRECTOR': 'DIRECTOR', 'SALES_EXECUTIVE': 'DIRECTOR'
+                    }
+                )
+
+        title_category_yr_end_column_list = ['TITLE_CATEGORY_YR_END_ACCOUNT_EXECUTIVE', 'TITLE_CATEGORY_YR_END_CONSULTANT', 'TITLE_CATEGORY_YR_END_DIRECTOR', 'TITLE_CATEGORY_YR_END_MANAGER', 'TITLE_CATEGORY_YR_END_REPRESENTATIVE']
+    
+        #one hot encode TITLE_CATEGORY_YR_END
+        df_title_category_yr_end = pd.get_dummies(df_external_data['TITLE_CATEGORY_YR_END'], prefix='TITLE_CATEGORY_YR_END')
+        df_title_category_yr_end = df_title_category_yr_end[title_category_yr_end_column_list]
+        df_external_data = df_external_data.drop(['TITLE_CATEGORY_YR_END'], axis=1)
+
+        #create DIFF_QUOTA_AMT_USD within df_external_data
+        df_external_data['DIFF_QUOTA_AMT_USD'] = df_external_data['MAX_QUOTA_AMT_USD'] - df_external_data['MIN_QUOTA_AMT_USD']
+
+        df_external_data = pd.concat([df_external_data, df_industry, df_ownership, df_title_category_yr_end], axis=1)
+
+        #filter out reporting columns
+        reporting_columns_list = ['BUSINESS_ID', 'CAL_YEAR', 'TERM_AS_OF_DATE', 'MASTER_PARTICIPANT_ID']
+        index_reporting_columns = df_external_data.columns.difference(reporting_columns_list)
+        df_external_data = df_external_data[index_reporting_columns]
+        
+        #filter extraneous columns from df_external_data
+        train_test_column_list = ['PR_TARGET_USD', 'SALARY_USD', 'COUNT_MONTH_EMPLOYED_TIL_DEC', 'COUNT_MONTHS_GOT_PAYMENT', 'LAST_PAYMENT_UNTIL_YR_END', 'YEAR_PAYMENT', 'COUNT_UNIQ_QUOTA', 'COUNT_AVG_MONTH_PAID_QUOTA', 'LAST_QUOTA_PAID_UNTIL_YR_END', 'SUM_CREDIT_AMT_USD', 'MIN_CREDIT_AMT_USD', 'DIFF_QUOTA_AMT_USD', 'COUNT_UNIQ_TITLE_NAME', 'COUNT_UNIQ_MGR_ID', 'TITLE_CATEGORY_YR_END_ACCOUNT_EXECUTIVE', 'TITLE_CATEGORY_YR_END_CONSULTANT', 'TITLE_CATEGORY_YR_END_DIRECTOR', 'TITLE_CATEGORY_YR_END_MANAGER', 'TITLE_CATEGORY_YR_END_REPRESENTATIVE', 'INDUSTRY_SaaS & Cloud', 'OWNERSHIP_Public', 'OWNERSHIP_private', 'TERM_NEXT_YEAR']
+
+        df_external_data = df_external_data[train_test_column_list]
+
+        #fill in missing values
+        df_external_data.fillna(df_external_data.mean(), inplace=True)
+        
+        #split df_external_data to train and test
+        [df_external_train, df_external_test] = train_test_split(df_external_data, test_size = 1/3, random_state = 42)
+
+        return [df_external_train, df_external_test]
+
 
     def predict(self):
 
         global TEST_MODE_ON
+        global USE_IMP_TRAIN_TEST_DATASET
 
         self.log_file_str += '\n' + 'In predict()' + '\n'
         self.log_file_str += '====================' + '\n'
@@ -1202,36 +1276,70 @@ class LivePrediction(object):
             self.df = self.df.drop(reporting_column_list, axis=1)
             rf_max_features = len(self.df.columns.tolist()) - 1
 
-            #print(self.df.columns.tolist())
-            #sys.exit(0)
+            df_train = None
+            df_test = None
+            df_external_train = None
+            df_external_test = None
+
+            df_external_train_target = None
+            df_external_test_target = None
+
+            #model training/testing
+            if USE_IMP_TRAIN_TEST_DATASET == True:
+                [df_external_train, df_external_test] = self.get_external_train_test_data()
+                [df_train, df_test] = train_test_split(self.df, test_size = 1/3, random_state = 42)
+
+                df_external_train_target = df_external_train[['TERM_NEXT_YEAR']]
+                df_external_train = df_external_train.drop(['TERM_NEXT_YEAR'], axis=1)
+
+                df_external_test_target = df_external_test[['TERM_NEXT_YEAR']]
+                df_external_test = df_external_test.drop(['TERM_NEXT_YEAR'], axis=1)
+
+            else:
+                [df_train, df_test] = train_test_split(self.df, test_size = 1/3, random_state = 42)
 
             rf_model = RandomForestClassifier(n_estimators = 100, criterion = 'entropy', max_depth = 50, max_features = rf_max_features, min_samples_split = 10, ccp_alpha=0.00001, random_state=42)
 
             self.log_file_str += 'Successfully created RandomForestClassifier' + '\n'
-
-            #model training/testing
-            [df_train, df_test] = train_test_split(self.df, test_size = 1/3, random_state = 42)
-
+            
             df_train_target = df_train[['TERM_NEXT_YEAR']]
             df_train = df_train.drop(['TERM_NEXT_YEAR'], axis=1)
 
             df_test_target = df_test[['TERM_NEXT_YEAR']]
             df_test = df_test.drop(['TERM_NEXT_YEAR'], axis=1)
 
-            x_train = df_train.values
-            y_train = df_train_target.values
+            y_test_pred = None
+            train_score = None
+            test_score = None
 
-            x_test = df_test.values
-            y_test = df_test_target.values
+            if USE_IMP_TRAIN_TEST_DATASET == True:
+                x_external_train = df_external_train.values
+                y_external_train = df_external_train_target.values
 
-            #train model
-            rf_model.fit(x_train, y_train)
-            y_test_pred = rf_model.predict(x_test)
+                x_external_test = df_external_test.values
+                y_external_test = df_external_test_target.values
+
+                rf_model.fit(x_external_train, y_external_train)
+                y_test_pred = rf_model.predict(x_external_test)
+
+                train_score = rf_model.score(x_external_train, y_external_train)
+                test_score = rf_model.score(x_external_test, y_external_test)
+
+            else:
+
+                x_train = df_train.values
+                y_train = df_train_target.values
+
+                x_test = df_test.values
+                y_test = df_test_target.values
+
+                rf_model.fit(x_train, y_train)
+                y_test_pred = rf_model.predict(x_test)
+
+                train_score = rf_model.score(x_train, y_train)
+                test_score = rf_model.score(x_test, y_test)
 
             self.log_file_str += 'Successfully trained RandomForestClassifier' + '\n'
-
-            train_score = rf_model.score(x_train, y_train)
-            test_score = rf_model.score(x_test, y_test)
 
             print("Test score: ", test_score, "Train score: ", train_score)
             self.log_file_str += 'Train score: ' + str(train_score) + '\n'
@@ -1245,7 +1353,7 @@ class LivePrediction(object):
 
             self.log_file_str += 'Generated probs successfully' + '\n'
           
-            #print('Executed predict_proba successfully')
+            print('Executed predict_proba successfully')
 
 
         except ValueError as v:
