@@ -48,9 +48,6 @@ print("sklearn version:", sklearn.__version__)
 
 # COMMAND ----------
 
-#read fiscal attrition data
-#df_attrition = spark.read.csv("dbfs:/FileStore/fiscal_attrition_with_headers.tsv", header=True, sep='\t').toPandas()
-
 MAX_COL = 56
 
  #save cols into mandatory_reporting_columns and optional_reporting_columns for proper file processing within CleanData
@@ -63,7 +60,6 @@ MANDATORY_REPORTING_COLUMNS_FISCAL = ['BUSINESS_ID', 'FISCAL_YEAR', 'TERM_AS_OF_
 #constants to control how this notebook is run
 TEST_MODE_ON = False
 USE_IMP_TRAIN_TEST_DATASET = True
-USE_BRENNAN_MODEL = True
 
 # COMMAND ----------
 
@@ -1184,8 +1180,6 @@ class LivePrediction(object):
         print("Cleaned Data Successfully.")
 
     def get_external_train_test_data(self):
-
-        global USE_BRENNAN_MODEL
         
         #load outside train_test data
         df_external_data = None
@@ -1200,15 +1194,18 @@ class LivePrediction(object):
         df_industry = pd.get_dummies(df_external_data['INDUSTRY'], prefix='INDUSTRY')
         df_ownership = pd.get_dummies(df_external_data['OWNERSHIP'], prefix='OWNERSHIP')
 
-        if USE_BRENNAN_MODEL == True:
-            industry_column_list = ['INDUSTRY_SaaS & Cloud','INDUSTRY_Business Services','INDUSTRY_Communications', 'INDUSTRY_Life Sciences & Pharma', 
-                                    'INDUSTRY_Manufacturing', 'INDUSTRY_Retail']
-        else:
+        industry_column_list = []
+
+        if 'INDUSTRY_SaaS & Cloud' in self.df.columns.tolist():
             industry_column_list = ['INDUSTRY_SaaS & Cloud']
+            df_industry = df_industry[industry_column_list]
+        else:
+            df_industry = None
+
         
         ownership_column_list = ['OWNERSHIP_Public','OWNERSHIP_Private']
 
-        df_industry = df_industry[industry_column_list] 
+        #df_industry = df_industry[industry_column_list] 
         df_ownership = df_ownership[ownership_column_list]
 
         #rename OWNERSHIP_Private
@@ -1240,7 +1237,10 @@ class LivePrediction(object):
         #create DIFF_QUOTA_AMT_USD within df_external_data
         df_external_data['DIFF_QUOTA_AMT_USD'] = df_external_data['MAX_QUOTA_AMT_USD'] - df_external_data['MIN_QUOTA_AMT_USD']
 
-        df_external_data = pd.concat([df_external_data, df_industry, df_ownership, df_title_category_yr_end], axis=1)
+        if df_industry is not None:
+            df_external_data = pd.concat([df_external_data, df_industry, df_ownership, df_title_category_yr_end], axis=1)
+        else:
+            df_external_data = pd.concat([df_external_data, df_ownership, df_title_category_yr_end], axis=1)
 
         #filter out reporting columns
         reporting_columns_list = ['BUSINESS_ID', 'CAL_YEAR', 'TERM_AS_OF_DATE', 'MASTER_PARTICIPANT_ID']
@@ -1265,7 +1265,6 @@ class LivePrediction(object):
 
         global TEST_MODE_ON
         global USE_IMP_TRAIN_TEST_DATASET
-        global USE_BRENNAN_MODEL
 
         self.log_file_str += '\n' + 'In predict()' + '\n'
         self.log_file_str += '====================' + '\n'
@@ -1290,6 +1289,9 @@ class LivePrediction(object):
             df_external_train_target = None
             df_external_test_target = None
 
+            #rename INDUSTRY_SaaS & Cloud to something else as a test
+            #self.df = self.df.rename(columns={'INDUSTRY_SaaS & Cloud':'INDUSTRY_pizza'})
+
             #model training/testing
             if USE_IMP_TRAIN_TEST_DATASET == True:
                 [df_external_train, df_external_test] = self.get_external_train_test_data()
@@ -1308,10 +1310,9 @@ class LivePrediction(object):
             else:
                 [df_train, df_test] = train_test_split(self.df, test_size = 1/3, random_state = 42)
             
-            #select only industry columns approved for Matt Brennan's model
-            if USE_BRENNAN_MODEL == True:
-                industry_column_list = ['INDUSTRY_SaaS & Cloud','INDUSTRY_Business Services','INDUSTRY_Communications', 'INDUSTRY_Life Sciences & Pharma', 'INDUSTRY_Manufacturing', 'INDUSTRY_Retail']
-            else:
+            industry_column_list = []
+
+            if 'INDUSTRY_SaaS & Cloud' in df_train.columns.tolist():
                 industry_column_list = ['INDUSTRY_SaaS & Cloud']
             
             #filter df_train and df_test
@@ -1377,10 +1378,9 @@ class LivePrediction(object):
             #rename OWNERSHIP_Private to OWNERSHIP_private
             self.df = self.df.rename(columns={"OWNERSHIP_Private":"OWNERSHIP_private"})
 
-            #next, ensure that self.df is using the same columns as Matt Brennan did when he first built this model
-            if USE_BRENNAN_MODEL == True:
-                industry_column_list = ['INDUSTRY_SaaS & Cloud','INDUSTRY_Business Services','INDUSTRY_Communications', 'INDUSTRY_Life Sciences & Pharma', 'INDUSTRY_Manufacturing', 'INDUSTRY_Retail']
-            else:
+            industry_column_list = []
+
+            if 'INDUSTRY_SaaS & Cloud' in self.df.columns.tolist():
                 industry_column_list = ['INDUSTRY_SaaS & Cloud']
             
             #filter df_train and df_test
