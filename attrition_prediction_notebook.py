@@ -1405,8 +1405,9 @@ class LivePrediction(object):
             #logger.critical(msg)
             #logger.critical(v)
             raise ValueError(msg)
-        except:
-            msg = "Unspecified Error when making prediction."
+        except Exception as e:
+            #msg = "Unspecified Error when making prediction."
+            msg = str(e)
             self.log_file_str += msg
             self.write_log_file()
             #logger.critical(msg)
@@ -1630,9 +1631,17 @@ df_trigger_attrition = spark.read \
 #if the flag is False,then we don't execute attrition
 trigger_attrition_flag = df_trigger_attrition.loc[0, 'VALUE']
 
-print(trigger_attrition_flag)
+print("trigger_attrition_flag = " + str(trigger_attrition_flag))
 
-if trigger_attrition_flag == 'TRUE' or TEST_MODE_ON == True:
+#this will help determine if the job is triggered by the scheduler or remotely
+parameter_dict = dict(dbutils.notebook.entry_point.getCurrentBindings())
+
+job_executed_remotely = False
+
+if 'job_source' in parameter_dict:
+    job_executed_remotely = True
+
+if trigger_attrition_flag == 'TRUE' or TEST_MODE_ON == True or job_executed_remotely == True:
 
     #create cleaning object for gregorian predictions - but only for real files
     gregorian_data = CleanData('gregorian', test_mode=TEST_MODE_ON, log_file_str=gregorian_log_file_str)
