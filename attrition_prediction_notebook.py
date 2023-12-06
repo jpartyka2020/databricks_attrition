@@ -1226,21 +1226,35 @@ class LivePrediction(object):
                     'MANAGER_INSIDE_SALES': 'MANAGER', 'MANAGER_LEAD_GENERATION': 'MANAGER', 'SALES_DIRECTOR': 'DIRECTOR', 'SALES_EXECUTIVE': 'DIRECTOR'
                     }
                 )
-
+        
         title_category_yr_end_column_list = ['TITLE_CATEGORY_YR_END_ACCOUNT_EXECUTIVE', 'TITLE_CATEGORY_YR_END_CONSULTANT', 'TITLE_CATEGORY_YR_END_DIRECTOR', 'TITLE_CATEGORY_YR_END_MANAGER', 'TITLE_CATEGORY_YR_END_REPRESENTATIVE']
-    
-        #one hot encode TITLE_CATEGORY_YR_END
-        df_title_category_yr_end = pd.get_dummies(df_external_data['TITLE_CATEGORY_YR_END'], prefix='TITLE_CATEGORY_YR_END')
-        df_title_category_yr_end = df_title_category_yr_end[title_category_yr_end_column_list]
+
+        #if the data does not have all of the necessary values for TITLE_CATEGORY_YR_END, then we will not use any of them as model predictors
+        if all(this_title in self.df.columns.tolist() for this_title in title_category_yr_end_column_list):
+
+            #one hot encode TITLE_CATEGORY_YR_END
+            df_title_category_yr_end = pd.get_dummies(df_external_data['TITLE_CATEGORY_YR_END'], prefix='TITLE_CATEGORY_YR_END')
+            df_title_category_yr_end = df_title_category_yr_end[title_category_yr_end_column_list]
+            
+        else:
+            
+            title_category_yr_end_column_list = []
+            df_title_category_yr_end = None
+        
+
         df_external_data = df_external_data.drop(['TITLE_CATEGORY_YR_END'], axis=1)
 
         #create DIFF_QUOTA_AMT_USD within df_external_data
         df_external_data['DIFF_QUOTA_AMT_USD'] = df_external_data['MAX_QUOTA_AMT_USD'] - df_external_data['MIN_QUOTA_AMT_USD']
 
-        if df_industry is not None:
+        if df_industry is not None and df_title_category_yr_end is not None:
             df_external_data = pd.concat([df_external_data, df_industry, df_ownership, df_title_category_yr_end], axis=1)
-        else:
+        elif df_industry is None and df_title_category_yr_end is not None:
             df_external_data = pd.concat([df_external_data, df_ownership, df_title_category_yr_end], axis=1)
+        elif df_industry is not None and df_title_category_yr_end is None:
+            df_external_data = pd.concat([df_external_data, df_ownership, df_industry], axis=1)
+        else:
+            df_external_data = pd.concat([df_external_data, df_ownership], axis=1)
 
         #filter out reporting columns
         reporting_columns_list = ['BUSINESS_ID', 'CAL_YEAR', 'TERM_AS_OF_DATE', 'MASTER_PARTICIPANT_ID']
@@ -1248,7 +1262,7 @@ class LivePrediction(object):
         df_external_data = df_external_data[index_reporting_columns]
         
         #filter extraneous columns from df_external_data
-        train_test_column_list = ['PR_TARGET_USD', 'SALARY_USD', 'COUNT_MONTH_EMPLOYED_TIL_DEC', 'COUNT_MONTHS_GOT_PAYMENT', 'LAST_PAYMENT_UNTIL_YR_END', 'YEAR_PAYMENT', 'COUNT_UNIQ_QUOTA', 'COUNT_AVG_MONTH_PAID_QUOTA', 'LAST_QUOTA_PAID_UNTIL_YR_END', 'SUM_CREDIT_AMT_USD', 'MIN_CREDIT_AMT_USD', 'DIFF_QUOTA_AMT_USD', 'COUNT_UNIQ_TITLE_NAME', 'COUNT_UNIQ_MGR_ID', 'TITLE_CATEGORY_YR_END_ACCOUNT_EXECUTIVE', 'TITLE_CATEGORY_YR_END_CONSULTANT', 'TITLE_CATEGORY_YR_END_DIRECTOR', 'TITLE_CATEGORY_YR_END_MANAGER', 'TITLE_CATEGORY_YR_END_REPRESENTATIVE', 'OWNERSHIP_Public', 'OWNERSHIP_private', 'TERM_NEXT_YEAR'] + industry_column_list
+        train_test_column_list = ['PR_TARGET_USD', 'SALARY_USD', 'COUNT_MONTH_EMPLOYED_TIL_DEC', 'COUNT_MONTHS_GOT_PAYMENT', 'LAST_PAYMENT_UNTIL_YR_END', 'YEAR_PAYMENT', 'COUNT_UNIQ_QUOTA', 'COUNT_AVG_MONTH_PAID_QUOTA', 'LAST_QUOTA_PAID_UNTIL_YR_END', 'SUM_CREDIT_AMT_USD', 'MIN_CREDIT_AMT_USD', 'DIFF_QUOTA_AMT_USD', 'COUNT_UNIQ_TITLE_NAME', 'COUNT_UNIQ_MGR_ID','OWNERSHIP_Public', 'OWNERSHIP_private', 'TERM_NEXT_YEAR'] + title_category_yr_end_column_list + industry_column_list
 
         df_external_data = df_external_data[train_test_column_list]
 
@@ -1289,8 +1303,8 @@ class LivePrediction(object):
             df_external_train_target = None
             df_external_test_target = None
 
-            #rename INDUSTRY_SaaS & Cloud to something else as a test
-            #self.df = self.df.rename(columns={'INDUSTRY_SaaS & Cloud':'INDUSTRY_pizza'})
+            #for testing purposes
+            #self.df = self.df.rename(columns={'TITLE_CATEGORY_YR_END_ACCOUNT_EXECUTIVE':'TITLE_CATEGORY_YR_END_ACCOUNT_BREAKFAST_DUDE'})
 
             #model training/testing
             if USE_IMP_TRAIN_TEST_DATASET == True:
@@ -1315,8 +1329,13 @@ class LivePrediction(object):
             if 'INDUSTRY_SaaS & Cloud' in df_train.columns.tolist():
                 industry_column_list = ['INDUSTRY_SaaS & Cloud']
             
+            title_category_yr_end_column_list = ['TITLE_CATEGORY_YR_END_ACCOUNT_EXECUTIVE', 'TITLE_CATEGORY_YR_END_CONSULTANT', 'TITLE_CATEGORY_YR_END_DIRECTOR', 'TITLE_CATEGORY_YR_END_MANAGER', 'TITLE_CATEGORY_YR_END_REPRESENTATIVE']
+
+            if not all(this_title in self.df.columns.tolist() for this_title in title_category_yr_end_column_list):    
+                title_category_yr_end_column_list = []
+
             #filter df_train and df_test
-            train_test_column_list = ['PR_TARGET_USD', 'SALARY_USD', 'COUNT_MONTH_EMPLOYED_TIL_DEC', 'COUNT_MONTHS_GOT_PAYMENT', 'LAST_PAYMENT_UNTIL_YR_END', 'YEAR_PAYMENT', 'COUNT_UNIQ_QUOTA', 'COUNT_AVG_MONTH_PAID_QUOTA', 'LAST_QUOTA_PAID_UNTIL_YR_END', 'SUM_CREDIT_AMT_USD', 'MIN_CREDIT_AMT_USD', 'DIFF_QUOTA_AMT_USD', 'COUNT_UNIQ_TITLE_NAME', 'COUNT_UNIQ_MGR_ID', 'TITLE_CATEGORY_YR_END_ACCOUNT_EXECUTIVE', 'TITLE_CATEGORY_YR_END_CONSULTANT', 'TITLE_CATEGORY_YR_END_DIRECTOR', 'TITLE_CATEGORY_YR_END_MANAGER', 'TITLE_CATEGORY_YR_END_REPRESENTATIVE', 'OWNERSHIP_Public', 'OWNERSHIP_private', 'TERM_NEXT_YEAR'] + industry_column_list
+            train_test_column_list = ['PR_TARGET_USD', 'SALARY_USD', 'COUNT_MONTH_EMPLOYED_TIL_DEC', 'COUNT_MONTHS_GOT_PAYMENT', 'LAST_PAYMENT_UNTIL_YR_END', 'YEAR_PAYMENT', 'COUNT_UNIQ_QUOTA', 'COUNT_AVG_MONTH_PAID_QUOTA', 'LAST_QUOTA_PAID_UNTIL_YR_END', 'SUM_CREDIT_AMT_USD', 'MIN_CREDIT_AMT_USD', 'DIFF_QUOTA_AMT_USD', 'COUNT_UNIQ_TITLE_NAME', 'COUNT_UNIQ_MGR_ID', 'OWNERSHIP_Public', 'OWNERSHIP_private', 'TERM_NEXT_YEAR'] + title_category_yr_end_column_list + industry_column_list
 
             df_train = df_train[train_test_column_list]
             df_test = df_test[train_test_column_list]
@@ -1384,7 +1403,7 @@ class LivePrediction(object):
                 industry_column_list = ['INDUSTRY_SaaS & Cloud']
             
             #filter df_train and df_test
-            train_test_column_list = ['PR_TARGET_USD', 'SALARY_USD', 'COUNT_MONTH_EMPLOYED_TIL_DEC', 'COUNT_MONTHS_GOT_PAYMENT', 'LAST_PAYMENT_UNTIL_YR_END', 'YEAR_PAYMENT', 'COUNT_UNIQ_QUOTA', 'COUNT_AVG_MONTH_PAID_QUOTA', 'LAST_QUOTA_PAID_UNTIL_YR_END', 'SUM_CREDIT_AMT_USD', 'MIN_CREDIT_AMT_USD', 'DIFF_QUOTA_AMT_USD', 'COUNT_UNIQ_TITLE_NAME', 'COUNT_UNIQ_MGR_ID', 'TITLE_CATEGORY_YR_END_ACCOUNT_EXECUTIVE', 'TITLE_CATEGORY_YR_END_CONSULTANT', 'TITLE_CATEGORY_YR_END_DIRECTOR', 'TITLE_CATEGORY_YR_END_MANAGER', 'TITLE_CATEGORY_YR_END_REPRESENTATIVE', 'OWNERSHIP_Public', 'OWNERSHIP_private'] + industry_column_list
+            train_test_column_list = ['PR_TARGET_USD', 'SALARY_USD', 'COUNT_MONTH_EMPLOYED_TIL_DEC', 'COUNT_MONTHS_GOT_PAYMENT', 'LAST_PAYMENT_UNTIL_YR_END', 'YEAR_PAYMENT', 'COUNT_UNIQ_QUOTA', 'COUNT_AVG_MONTH_PAID_QUOTA', 'LAST_QUOTA_PAID_UNTIL_YR_END', 'SUM_CREDIT_AMT_USD', 'MIN_CREDIT_AMT_USD', 'DIFF_QUOTA_AMT_USD', 'COUNT_UNIQ_TITLE_NAME', 'COUNT_UNIQ_MGR_ID','OWNERSHIP_Public', 'OWNERSHIP_private'] + title_category_yr_end_column_list + industry_column_list
 
             #ensure that self.df is using the correct columns for predictions
             self.df = self.df[train_test_column_list]
