@@ -75,9 +75,9 @@ gregorian_log_file_str = ""
 #we also might not need these -- hmmm...
 
 gregorian_header_path_cl = ''
-gregorian_file_path_cl = '/dbfs/FileStore/attrition_test_data/cleaned_gregorian_data.tsv'
+gregorian_file_path_cl = '/dbfs/FileStore/attrition_cleaned_data_files/cleaned_gregorian_data.tsv'
 fiscal_header_path_cl = ''
-fiscal_file_path_cl = '/dbfs/FileStore/attrition_test_data/cleaned_fiscal_data.tsv'
+fiscal_file_path_cl = '/dbfs/FileStore/attrition_cleaned_data_files/cleaned_fiscal_data.tsv'
 gregorian_output_path = '/dbfs/FileStore/prediction_output/'
 gregorian_vis_output_path = '/dbfs/FileStore/visual_output/'
 fiscal_output_path = '/dbfs/FileStore/prediction_output/'
@@ -635,7 +635,7 @@ class CleanData(object):
         elif self.calendar_type == 'fiscal':
             cleaned_file_name = 'cleaned_fiscal_data.tsv'
 
-        self.df.to_csv('/dbfs/FileStore/attrition_test_data/' + cleaned_file_name, index=False, sep='\t')
+        self.df.to_csv('/dbfs/FileStore/attrition_cleaned_data_files/' + cleaned_file_name, index=False, sep='\t')
 
         print("Selected Features.")
         print(self.df)
