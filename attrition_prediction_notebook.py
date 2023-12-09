@@ -109,15 +109,6 @@ options = {
 
 # COMMAND ----------
 
-#truncate all attrition snowflake tables before starting by calling the attrition_truncate_snowflake_tables notebook
-truncate_success = dbutils.notebook.run("attrition_truncate_snowflake_tables", 60)
-
-if truncate_success != "success":
-    print("Not able to truncate Snowflake tables...stopping execution")
-    sys.exit(0)
-
-# COMMAND ----------
-
 class CleanData(object):
 
     def __init__(self, calendar_type, test_mode=False, log_file_str=None):
@@ -1662,6 +1653,13 @@ if 'job_source' in parameter_dict:
 
 if trigger_attrition_flag == 'TRUE' or TEST_MODE_ON == True or job_executed_remotely == True:
 
+    #first, truncate Snowflake tables
+    truncate_success = dbutils.notebook.run("attrition_truncate_snowflake_tables", 60)
+
+    if truncate_success != "success":
+        print("Not able to truncate Snowflake tables...stopping execution")
+        sys.exit(0)
+
     #create cleaning object for gregorian predictions - but only for real files
     gregorian_data = CleanData('gregorian', test_mode=TEST_MODE_ON, log_file_str=gregorian_log_file_str)
     rfModelGregorian = RandomForest(gregorian_data, 'RandomForest')
@@ -1720,12 +1718,22 @@ if trigger_attrition_flag == 'TRUE' or TEST_MODE_ON == True or job_executed_remo
         #convert df_trigger_attrition to a spark dataframe
         df_spark_trigger_attrition = spark.createDataFrame(df_trigger_attrition)
 
+        #truncate all attrition snowflake tables before starting by calling the attrition_truncate_snowflake_tables notebook
+        delete_trigger_attrition_rows_success = dbutils.notebook.run("clear_trigger_attrition_table", 60)
+
+        if delete_trigger_attrition_rows_success != "success":
+            print("Not able to clear out INSIGHTS_PARAMETER table.")
+        else:
+            print("Successfully cleared out INSIGHTS_PARAMETER table.")
+
         df_spark_trigger_attrition.write \
             .format("snowflake") \
             .mode("append") \
             .options(**options) \
             .option("dbtable", "INSIGHTS_PARAMETER") \
             .save()
+        
+        print("Finished writing to INSIGHTS_PARAMETER table")
 else:
 
     print("flag is set to FALSE, attrition will not execute")

@@ -29,11 +29,22 @@
 # MAGIC //VISUALIZATION_GREGORIAN
 # MAGIC //practice: TURNOVER_PRED_FISCAL_TEMP1
 # MAGIC
-# MAGIC Utils.runQuery(options, "TRUNCATE TABLE TURNOVER_PRED_FISCAL_TEMP1")
-# MAGIC // Utils.runQuery(options, "TRUNCATE TABLE TURNOVER_PRED_GREGORIAN")
-# MAGIC // Utils.runQuery(options, "TRUNCATE TABLE TURNOVER_PRED_FISCAL")
-# MAGIC // Utils.runQuery(options, "TRUNCATE TABLE VISUALIZATION_GREGORIAN")
-# MAGIC // Utils.runQuery(options, "TRUNCATE TABLE VISUALIZATION_FISCAL")
+# MAGIC Utils.runQuery(options, "TRUNCATE TABLE TURNOVER_PRED_GREGORIAN")
+# MAGIC Utils.runQuery(options, "TRUNCATE TABLE TURNOVER_PRED_FISCAL")
+# MAGIC Utils.runQuery(options, "TRUNCATE TABLE VISUALISATION_GREGORIAN")
+# MAGIC Utils.runQuery(options, "TRUNCATE TABLE VISUALISATION_FISCAL")
+# MAGIC
+# MAGIC //we also want to effectively truncate the INSIGHTS_PARAMETER table by using a DELETE query
+# MAGIC val options_ip = Map (
+# MAGIC   "sfUrl" -> "https://xactly-xactly_engg_datalake_aws.snowflakecomputing.com/",
+# MAGIC   "sfUser" -> user,
+# MAGIC   "sfPassword" -> password,
+# MAGIC   "sfDatabase" -> "XTLY_ENGG",
+# MAGIC   "sfSchema" -> "INSIGHTS",
+# MAGIC   "sfWarehouse" -> "DIS_LOAD_WH"
+# MAGIC )
+# MAGIC
+# MAGIC Utils.runQuery(options_ip, "DELETE FROM INSIGHTS_PARAMETER WHERE name='TRIGGER_ATTRITION'")
 # MAGIC
 # MAGIC //if we get here, then the job was successful
 # MAGIC dbutils.notebook.exit("success")
