@@ -11,18 +11,18 @@ WORKSPACE_URL = "https://dbc-e12db167-30b0.cloud.databricks.com"
 
 db_name_to_job_id_dict = {}
 
-db_name_to_job_id_dict['dev'] = 998188560935528
+db_name_to_job_id_dict['dev'] = xxxxxxxxxxxxxxx
 
 #for all prod databases
-db_name_to_job_id_dict['secure1'] = 833279762035356
-db_name_to_job_id_dict['secure2'] = 211938150855559
-db_name_to_job_id_dict['secure3'] = 1046249980976101
-db_name_to_job_id_dict['secure4'] = 477313925068332
-db_name_to_job_id_dict['secure5'] = 794041493029182
-db_name_to_job_id_dict['staging1'] = 69934995721536
-db_name_to_job_id_dict['staging4'] = 780188600233987
-db_name_to_job_id_dict['eu1'] = 327857995367657
-db_name_to_job_id_dict['eustaging1'] = 710517488266939
+db_name_to_job_id_dict['secure1'] = xxxxxxxxxxxxxxx
+db_name_to_job_id_dict['secure2'] = xxxxxxxxxxxxxxx
+db_name_to_job_id_dict['secure3'] = xxxxxxxxxxxxxxx
+db_name_to_job_id_dict['secure4'] = xxxxxxxxxxxxxxx
+db_name_to_job_id_dict['secure5'] = xxxxxxxxxxxxxxx
+db_name_to_job_id_dict['staging1'] = xxxxxxxxxxxxxxx
+db_name_to_job_id_dict['staging4'] = xxxxxxxxxxxxxxx
+db_name_to_job_id_dict['eu1'] = xxxxxxxxxxxxxxx
+db_name_to_job_id_dict['eustaging1'] = xxxxxxxxxxxxxxx
 
 #this is a list that will determine which jobs we run
 db_job_run_list = []
