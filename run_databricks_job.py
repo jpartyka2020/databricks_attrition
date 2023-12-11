@@ -7,7 +7,7 @@ DATABRICKS_TOKEN_STRING = "dapiad60e91111da52a2da2c6b03441f228c"
 WORKSPACE_URL = "https://dbc-e12db167-30b0.cloud.databricks.com"
 
 #attrition dev job ID
-#JOB_ID = 998188560935528
+#JOB_ID = xxxxxxxxxxxxxxx
 
 db_name_to_job_id_dict = {}
 
