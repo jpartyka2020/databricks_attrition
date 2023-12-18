@@ -56,18 +56,16 @@ MAX_COL = 56
 
 # COMMAND ----------
 
-#we don't need to supply command line parameters in the Databricks environment.
-
 gregorian_header_path_cl = ''
-gregorian_file_path_cl = '/dbfs/FileStore/attrition_cleaned_data_files/cleaned_gregorian_data.tsv'
+gregorian_file_path_cl = ''
 fiscal_header_path_cl = ''
-fiscal_file_path_cl = '/dbfs/FileStore/attrition_cleaned_data_files/cleaned_fiscal_data.tsv'
+fiscal_file_path_cl = ''
+model_input_cl = '/dbfs/FileStore/pickleFiles'
 gregorian_output_path = '/dbfs/FileStore/prediction_output/'
 gregorian_vis_output_path = '/dbfs/FileStore/visual_output/'
 fiscal_output_path = '/dbfs/FileStore/prediction_output/'
-fortnightly_prediction_output_path = '/dbfs/FileStore/prediction_output/fortnightly_prediction_files'
 fiscal_vis_output_path = '/dbfs/FileStore/visual_output/'
-model_input_cl = '/dbfs/FileStore/pickleFiles'
+fortnightly_prediction_output_path = '/dbfs/FileStore/prediction_output/fortnightly_prediction_files'
 fortnightly_log_file_path = '/dbfs/FileStore/prediction_output/fortnightly_log_files'
 
 # COMMAND ----------
@@ -169,7 +167,11 @@ class LivePrediction(object):
                 
                 #print(self.df.columns.tolist())                
                 #print("shape of Snowflake dataset: " + str(self.df.shape))
-                #sys.exit(0)
+                if self.df.shape[0] == 0:
+                    print("Fiscal dataset has 0 rows, stopping execution...")
+                    self.log_file_str += "Fiscal dataset has 0 rows, stopping execution..."
+                    self.write_log_file()
+                    sys.exit(0)
             
             print('Loaded Fiscal Data')
             self.log_file_str += "Just loaded gregorian data successfully" + "\n"
@@ -188,7 +190,11 @@ class LivePrediction(object):
                 
                 #print(self.df.columns.tolist())
                 #print("shape of Snowflake dataset: " + str(self.df.shape))
-                #sys.exit(0)
+                if self.df.shape[0] == 0:
+                    print("Gregorian dataset has 0 rows, stopping execution...")
+                    self.log_file_str += "Gregorian dataset has 0 rows, stopping execution..."
+                    self.write_log_file()
+                    sys.exit(0)
 
             print('Loaded Gregorian Data')
             self.log_file_str += "Just loaded gregorian data successfully" + "\n"
@@ -645,7 +651,7 @@ class LivePrediction(object):
             rf_max_features = len(df_train.columns)
 
             if USE_MATT_MODEL == False:
-                self.model = RandomForestClassifier(n_estimators = 525, criterion = 'entropy', max_depth = 100, max_features = 'log2', min_samples_split = 5, ccp_alpha=0.000001, random_state=42)
+                self.model = RandomForestClassifier(n_estimators = 525, criterion = 'entropy', max_depth = 100, max_features = 20, min_samples_split = 10, ccp_alpha=0.000001, random_state=42)
 
                 self.model.fit(x_external_train, y_external_train)
                 y_test_pred = self.model.predict(x_external_test)
@@ -895,7 +901,7 @@ if TEST_MODE_ON == False:
     try:
         trigger_attrition_flag = df_trigger_attrition.loc[0, 'VALUE']
     except Exception:
-        trigger_attrition_flag = "TRUE"
+        trigger_attrition_flag = "FALSE"
 
     print("trigger_attrition_flag = " + str(trigger_attrition_flag))
 
