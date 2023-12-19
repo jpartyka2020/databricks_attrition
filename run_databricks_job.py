@@ -63,15 +63,20 @@ FINAL_URL = WORKSPACE_URL + "/api/2.1/jobs/run-now"
 #run through all db names and get the job ID associated with each
 for this_db_job in db_job_run_list:
     
-    this_job_id = db_name_to_job_id_dict[this_db_job]
+    try:
+        
+        this_job_id = db_name_to_job_id_dict[this_db_job]
+
+        print("Running job for " + this_db_job + "..." + "\n")
+
+        job_json = {"job_id": this_job_id,
+                    "notebook_params":{
+                        "job_source":"remote"
+                    }
+        }
     
-    print("Running job for " + this_db_job + "..." + "\n")
+        response = requests.post(FINAL_URL, json=job_json, headers=auth_json)
+        print(response.json())
     
-    job_json = {"job_id": this_job_id,
-                "notebook_params":{
-                    "job_source":"remote"
-                }
-    }
-    
-    response = requests.post(FINAL_URL, json=job_json, headers=auth_json)
-    print(response.json())
+    except Exception:
+        print("pod name " + this_db_job + " is not valid.")
