@@ -782,6 +782,10 @@ class LivePrediction(object):
 
                 self.results = pd.DataFrame(d)
 
+                #add jitter values if successful
+                if JITTER_FAILED == False and ADD_JITTER == True:
+                    self.results['PRED_TERM_PROB'] = self.results['PRED_TERM_PROB'] + self.df['jitter']
+
                 if self.test_mode == True:
 
                     self.results.to_csv(self.pred_output_path + "results_test_gregorian.csv", index=False)
