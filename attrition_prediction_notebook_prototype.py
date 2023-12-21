@@ -10,6 +10,7 @@ import sys
 import logging
 import warnings
 import os
+import hashlib
 
  
 import shap
@@ -50,8 +51,9 @@ print("sklearn version:", sklearn.__version__)
 
 #constants to control how this notebook is run
 TEST_MODE_ON = True
-USE_IMP_TRAIN_TEST_DATASET = True
-USE_MATT_MODEL = False
+USE_IMP_TRAIN_TEST_DATASET = False
+USE_MATT_MODEL = True
+ADD_JITTER = True
 MAX_COL = 56
 
 # COMMAND ----------
@@ -174,7 +176,7 @@ class LivePrediction(object):
                     sys.exit(0)
             
             print('Loaded Fiscal Data')
-            self.log_file_str += "Just loaded gregorian data successfully" + "\n"
+            self.log_file_str += "Just loaded fiscal data successfully" + "\n"
 
         
         elif self.type_model == 'gregorian':
@@ -202,6 +204,7 @@ class LivePrediction(object):
         else:
             self.log_file_str += "Could not load data" + "\n"
             raise NameError('HiThere')
+
 
         dtypes_series = self.df.dtypes
 
@@ -235,7 +238,7 @@ class LivePrediction(object):
                 self.log_file_str += 'self.type_model = fiscal' + '\n'
 
                 self.data_object = load(
-                    open(self.model_path + '/data_object_fiscal.obj', 'rb')
+                    open(self.model_path + '/data_object_fiscal_matt.obj', 'rb')
                 )
 
                 self.log_file_str += 'data_object_fiscal.obj successfully loaded' + '\n'
@@ -257,7 +260,7 @@ class LivePrediction(object):
                 self.log_file_str += 'self.type_model = gregorian' + '\n'
 
                 self.data_object = load(
-                    open(self.model_path + '/data_object_gregorian.obj', 'rb')
+                    open(self.model_path + '/data_object_gregorian_matt.obj', 'rb')
                 )
 
                 self.log_file_str += 'data_object_gregorian.obj successfully loaded' + '\n'
@@ -374,6 +377,7 @@ class LivePrediction(object):
             raise KeyError(msg)
 
 
+
         #Add Difference Variables:
 
         #set data types diff-related columns
@@ -448,6 +452,7 @@ class LivePrediction(object):
             [var_df, one_hot_df], axis=1
         )
 
+
         feature_list = [
         'PR_TARGET_USD','SALARY_USD','COUNT_MONTH_EMPLOYED_TIL_DEC',
         'COUNT_MONTHS_GOT_PAYMENT','LAST_PAYMENT_UNTIL_YR_END','YEAR_PAYMENT',
@@ -466,9 +471,11 @@ class LivePrediction(object):
         #Ensure all Categorical Features Present:
         try:
 
+            df_columns_list = self.df.columns.tolist()
+
             #for col in self.data_object.one_hot_df.columns:
             for col in feature_list:
-                if col not in one_hot_features:
+                if col not in df_columns_list:
                     self.df[col] = 0
 
         except AttributeError as a:
@@ -511,14 +518,11 @@ class LivePrediction(object):
             self.df['COMP_AVG_MONTH_PAYEECOUNT'] = self.df['COMP_AVG_MONTH_PAYEECOUNT'].astype(int)
             
 
-        #print("Features from self.data_object.features = " + str(self.data_object.features))
-        #print('---------')
-        #print("Features from self.df = " + str(self.df.columns.tolist()))
-
         self.df = self.df[feature_list]
         #self.df = self.df[self.data_object.features]
 
         print("bottom clean_input")
+        print('---------')
         print("Cleaned Data Successfully.")
 
     def get_external_train_test_data(self):
@@ -605,9 +609,30 @@ class LivePrediction(object):
         [df_external_train, df_external_test] = train_test_split(df_external_data, test_size = 1/3, random_state = 42)
 
         return [df_external_train, df_external_test]
+    
+    
+    # Define a hash function using SHA-256
+    def hash_function(self, row):
+        # Concatenate all values in the row to form a string
+        row_str = ''.join(map(str, row))
+        
+        # Use SHA-256 hash function
+        sha256_hash = hashlib.sha256(row_str.encode()).hexdigest()
+        
+        # Convert the hash to a float in the range [0,1]
+        hash_value = int(sha256_hash, 16) % (10**8) / 10**8
+
+        #ensure that jitter value added to prob value does not change prob that much
+        hash_value = hash_value * 1.0 / 100.0
+        
+        return hash_value
 
 
     def predict(self):
+
+        global USE_IMP_TRAIN_TEST_DATASET
+        global USE_MATT_MODEL
+        global ADD_JITTER
 
         self.log_file_str += '\n' + 'In predict()' + '\n'
         self.log_file_str += '====================' + '\n'
@@ -651,7 +676,7 @@ class LivePrediction(object):
             rf_max_features = len(df_train.columns)
 
             if USE_MATT_MODEL == False:
-                self.model = RandomForestClassifier(n_estimators = 525, criterion = 'entropy', max_depth = 100, max_features = 20, min_samples_split = 10, ccp_alpha=0.000001, random_state=42)
+                self.model = RandomForestClassifier(n_estimators = 500, criterion = 'entropy', max_depth = 75, max_features = 'log2', min_samples_split = 10, ccp_alpha=0.000001, random_state=42)
 
                 self.model.fit(x_external_train, y_external_train)
                 y_test_pred = self.model.predict(x_external_test)
@@ -677,6 +702,20 @@ class LivePrediction(object):
             #logger.critical(msg)
             raise ValueError(msg)
 
+        JITTER_FAILED = False
+            
+        #hash probability value for each row to reduce dups
+        if ADD_JITTER == True:
+            
+            try:
+
+                self.df['jitter'] = self.df.apply(self.hash_function, axis=1)
+                
+            except Exception as e:
+                msg = "Error creating jitter for probability values....skipping"
+                self.log_file_str += msg + '\n'
+                JITTER_FAILED = True
+        
 
         if self.type_model == 'fiscal':
             
@@ -688,6 +727,11 @@ class LivePrediction(object):
             try:
 
                 self.results = pd.DataFrame(d)
+
+                #add jitter values if successful
+                if JITTER_FAILED == False and ADD_JITTER == True:
+                    self.results['PRED_TERM_PROB'] = self.results['PRED_TERM_PROB'] + self.df['jitter']
+                
 
                 if self.test_mode == True:
 
@@ -701,7 +745,7 @@ class LivePrediction(object):
                     df_spark.write \
                         .format("snowflake") \
                         .mode("append") \
-                        .options(**options) \
+                        .options(**self.options) \
                         .option("dbtable", "TURNOVER_PRED_FISCAL") \
                         .save()
                     
@@ -750,7 +794,7 @@ class LivePrediction(object):
                     df_spark.write \
                         .format("snowflake") \
                         .mode("append") \
-                        .options(**options) \
+                        .options(**self.options) \
                         .option("dbtable", "TURNOVER_PRED_GREGORIAN") \
                         .save()
                 
@@ -881,6 +925,7 @@ class LivePrediction(object):
 
         print("Explainer ended.")
         self.log_file_str += 'Explainer ended' + '\n'
+
 
 # COMMAND ----------
 
