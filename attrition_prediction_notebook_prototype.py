@@ -50,7 +50,7 @@ print("sklearn version:", sklearn.__version__)
 # COMMAND ----------
 
 #constants to control how this notebook is run
-TEST_MODE_ON = True
+TEST_MODE_ON = False
 USE_IMP_TRAIN_TEST_DATASET = False
 USE_MATT_MODEL = True
 ADD_JITTER = True
@@ -149,6 +149,7 @@ class LivePrediction(object):
         self.test_mode = test_mode
         self.options = options
         self.df = None
+        self.empty_input_data = False
 
         #we will log events using a string
         self.log_file_str = ""
@@ -168,12 +169,13 @@ class LivePrediction(object):
                         .load().toPandas()
                 
                 #print(self.df.columns.tolist())                
-                #print("shape of Snowflake dataset: " + str(self.df.shape))
+                print("shape of Snowflake dataset: " + str(self.df.shape))
                 if self.df.shape[0] == 0:
-                    print("Fiscal dataset has 0 rows, stopping execution...")
-                    self.log_file_str += "Fiscal dataset has 0 rows, stopping execution..."
+                    print("Fiscal dataset has 0 rows, skipping fiscal processing...")
+                    self.log_file_str += "Fiscal dataset has 0 rows, skipping fiscal processing..."
                     self.write_log_file()
-                    sys.exit(0)
+                    self.empty_input_data = True
+                    return None
             
             print('Loaded Fiscal Data')
             self.log_file_str += "Just loaded fiscal data successfully" + "\n"
@@ -191,12 +193,13 @@ class LivePrediction(object):
                         .load().toPandas()
                 
                 #print(self.df.columns.tolist())
-                #print("shape of Snowflake dataset: " + str(self.df.shape))
+                print("shape of Snowflake dataset: " + str(self.df.shape))
                 if self.df.shape[0] == 0:
-                    print("Gregorian dataset has 0 rows, stopping execution...")
-                    self.log_file_str += "Gregorian dataset has 0 rows, stopping execution..."
+                    print("Gregorian dataset has 0 rows, skipping gregorian processing...")
+                    self.log_file_str += "Gregorian dataset has 0 rows, skipping gregorian processing..."
                     self.write_log_file()
-                    sys.exit(0)
+                    self.empty_input_data = True
+                    return None
 
             print('Loaded Gregorian Data')
             self.log_file_str += "Just loaded gregorian data successfully" + "\n"
@@ -731,6 +734,9 @@ class LivePrediction(object):
                 #add jitter values if successful
                 if JITTER_FAILED == False and ADD_JITTER == True:
                     self.results['PRED_TERM_PROB'] = self.results['PRED_TERM_PROB'] + self.df['jitter']
+
+                    #drop jitter column
+                    self.df = self.df.drop(['jitter'], axis=1)
                 
 
                 if self.test_mode == True:
@@ -785,6 +791,10 @@ class LivePrediction(object):
                 #add jitter values if successful
                 if JITTER_FAILED == False and ADD_JITTER == True:
                     self.results['PRED_TERM_PROB'] = self.results['PRED_TERM_PROB'] + self.df['jitter']
+
+                    #drop jitter column
+                    self.df = self.df.drop(['jitter'], axis=1)
+                
 
                 if self.test_mode == True:
 
@@ -918,6 +928,10 @@ class LivePrediction(object):
             else:
                 snowflake_table_name = "VISUALISATION_GREGORIAN"
             
+            #print("self.results cols are: " + str(self.results.columns.tolist()))
+            #if 'jitter' in self.results.columns.tolist():
+            #    self.results = self.results.drop(['jitter'], axis=1)
+            
             df_spark = spark.createDataFrame(self.results)
 
             df_spark.write \
@@ -935,6 +949,7 @@ class LivePrediction(object):
 
 #read the TRIGGER_ATTRITION table
 trigger_attrition_read_query = f"(select * from INSIGHTS_PARAMETER where name = 'TRIGGER_ATTRITION') AS subquery"
+
 
 df_trigger_attrition = spark.read \
                     .format("snowflake") \
@@ -962,7 +977,7 @@ job_executed_remotely = False
 if 'job_source' in parameter_dict:
     job_executed_remotely = True
 
-if trigger_attrition_flag == 'TRUE' or TEST_MODE_ON == True or job_executed_remotely == True:
+if trigger_attrition_flag == 'FALSE' or TEST_MODE_ON == True or job_executed_remotely == True:
 
     #first, truncate Snowflake tables
     truncate_success = dbutils.notebook.run("attrition_truncate_snowflake_tables", 60)
@@ -980,7 +995,7 @@ if trigger_attrition_flag == 'TRUE' or TEST_MODE_ON == True or job_executed_remo
 
     gregorian_args = ["gregorian", gregorian_header_path_cl, gregorian_file_path_cl, gregorian_output_path, gregorian_vis_output_path, model_input_cl, fortnightly_prediction_output_path, fortnightly_log_file_path, TEST_MODE_ON, options]
 
-    for input_lst in [gregorian_args, fiscal_args]: 
+    for input_lst_index, input_lst in enumerate([gregorian_args, fiscal_args]): 
         batch_pred = LivePrediction(
             input_lst[0], input_lst[1], input_lst[2],
             input_lst[3], input_lst[4], input_lst[5], 
@@ -988,17 +1003,29 @@ if trigger_attrition_flag == 'TRUE' or TEST_MODE_ON == True or job_executed_remo
             input_lst[9]
         )
 
-        batch_pred.clean_input()
-        batch_pred.predict()
-        batch_pred.explain_pred()
+        if batch_pred.empty_input_data == False:
 
-        #write log file
-        batch_pred.write_log_file()
+            batch_pred.clean_input()
+            batch_pred.predict()
+            batch_pred.explain_pred()
+
+            #write log file
+            batch_pred.write_log_file()
+        else:
+
+            if input_lst_index == 0:
+                file_type_str = "Gregorian"
+            else:
+                file_type_str = "Fiscal"
+
+            print("skipping " + file_type_str + " processing...")
+    
     
     if TEST_MODE_ON == False:
-        
+                
         try: 
             #set trigger_attrition_flag to FALSE
+            df_trigger_attrition.loc[0, 'NAME'] = 'INSIGHTS_PARAMETER'
             df_trigger_attrition.loc[0, 'VALUE'] = 'FALSE'
 
             #convert df_trigger_attrition to a spark dataframe
@@ -1015,6 +1042,7 @@ if trigger_attrition_flag == 'TRUE' or TEST_MODE_ON == True or job_executed_remo
 
         except Exception:
             print("error writing to INSIGHTS_PARAMETER table. Skipping...")
+                
 
 else:
 
